@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="El Rincón de los Nietos">
+  <rect width="512" height="512" rx="112" fill="#125633"/>
+  <rect x="72" y="72" width="368" height="368" rx="82" fill="#238653"/>
+  <g fill="#fff">
+    <rect x="146" y="160" width="220" height="44" rx="10"/>
+    <rect x="146" y="234" width="220" height="44" rx="10"/>
+    <rect x="146" y="308" width="220" height="44" rx="10"/>
+  </g>
+</svg>
