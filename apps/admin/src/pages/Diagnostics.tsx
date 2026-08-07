@@ -24,6 +24,12 @@ export function Diagnostics() {
   useEffect(() => {
     void load();
   }, []);
+  useEffect(() => {
+    if (!device || branches.length !== 1 || device.branchId === branches[0].id) return;
+    const updated = { ...device, branchId: branches[0].id };
+    setDevice(updated);
+    void saveDeviceConfig(updated);
+  }, [branches, device]);
   if (!device) return null;
   return (
     <>
@@ -44,20 +50,27 @@ export function Diagnostics() {
               Nombre
               <input value={device.name} onChange={(e) => setDevice({ ...device, name: e.target.value })} />
             </label>
-            <label className="grid gap-2 font-semibold">
-              Sucursal
-              <select
-                value={device.branchId ?? ''}
-                onChange={(e) => setDevice({ ...device, branchId: e.target.value || undefined })}
-              >
-                <option value="">Todas / administración</option>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {branches.length > 1 ? (
+              <label className="grid gap-2 font-semibold">
+                Sucursal
+                <select
+                  value={device.branchId ?? ''}
+                  onChange={(e) => setDevice({ ...device, branchId: e.target.value || undefined })}
+                >
+                  <option value="">Todas / administración</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <div>
+                <dt className="text-slate-500">Sucursal</dt>
+                <dd className="font-semibold">{branches[0]?.name ?? 'Sin sucursal activa'}</dd>
+              </div>
+            )}
           </dl>
           <button
             className="btn mt-5"

@@ -1,6 +1,6 @@
 import { ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Module, NotFoundException, Param, Patch, Post } from '@nestjs/common';
-import { IsBoolean, IsOptional, IsString, Length } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUUID, Length } from 'class-validator';
 import { CurrentSession, RequirePermissions, Session } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
 class BranchDto {
@@ -11,6 +11,7 @@ class BranchDto {
   @IsOptional() @IsString() province?: string;
   @IsOptional() @IsString() phone?: string;
   @IsOptional() @IsBoolean() active?: boolean;
+  @IsOptional() @IsUUID() copyFromBranchId?: string;
 }
 @ApiTags('Sucursales')
 @Controller('branches')
@@ -29,17 +30,45 @@ class BranchesController {
     if (!x) throw new NotFoundException('Sucursal no encontrada');
     return x;
   }
-  @Post() @RequirePermissions('branches.create') create(@CurrentSession() s: Session, @Body() d: BranchDto) {
-    return this.db.branch.create({ data: { ...d, code: d.code.toUpperCase(), companyId: s.companyId } });
+  @Post() @RequirePermissions('branches.create') async create(@CurrentSession() s: Session, @Body() d: BranchDto) {
+    const { copyFromBranchId, ...branchData } = d;
+    return this.db.$transaction(async (tx) => {
+      if (copyFromBranchId) {
+        const source = await tx.branch.findFirst({
+          where: { id: copyFromBranchId, companyId: s.companyId, active: true, deletedAt: null },
+        });
+        if (!source) throw new NotFoundException('Sucursal de origen no encontrada');
+      }
+      const branch = await tx.branch.create({
+        data: { ...branchData, code: d.code.toUpperCase(), companyId: s.companyId },
+      });
+      if (copyFromBranchId) {
+        const sourceProducts = await tx.branchProduct.findMany({ where: { branchId: copyFromBranchId } });
+        await tx.branchProduct.createMany({
+          data: sourceProducts.map(({ productId, cost, salePrice, margin, stockMinimum, enabled }) => ({
+            branchId: branch.id,
+            productId,
+            cost,
+            salePrice,
+            margin,
+            stockMinimum,
+            enabled,
+          })),
+        });
+      }
+      return branch;
+    });
   }
   @Patch(':id') @RequirePermissions('branches.update') update(
     @CurrentSession() s: Session,
     @Param('id') id: string,
     @Body() d: Partial<BranchDto>,
   ) {
+    const branchData = { ...d };
+    delete branchData.copyFromBranchId;
     return this.db.branch.update({
       where: { id, companyId: s.companyId },
-      data: { ...d, code: d.code?.toUpperCase() },
+      data: { ...branchData, code: d.code?.toUpperCase() },
     });
   }
   @Delete(':id') @RequirePermissions('branches.delete') remove(@CurrentSession() s: Session, @Param('id') id: string) {

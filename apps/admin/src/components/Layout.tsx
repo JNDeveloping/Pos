@@ -17,6 +17,7 @@ import {
 import type { Me } from '../lib/api';
 import { can } from '../lib/api';
 import { SyncIndicator } from './SyncIndicator';
+import type { Branch } from '../pages/Branches';
 const items = [
   ['/', 'Inicio', LayoutDashboard, 'dashboard.view'],
   ['/branches', 'Sucursales', Building2, 'branches.view'],
@@ -27,7 +28,19 @@ const items = [
   ['/roles', 'Roles y permisos', ShieldCheck, 'roles.view'],
   ['/settings', 'Configuración', Settings, 'branches.update'],
 ] as const;
-export function Layout({ me, children }: { me: Me; children: React.ReactNode }) {
+export function Layout({
+  me,
+  branches,
+  currentBranchId,
+  onBranchChange,
+  children,
+}: {
+  me: Me;
+  branches: Branch[];
+  currentBranchId?: string;
+  onBranchChange: (branchId?: string) => Promise<void>;
+  children: React.ReactNode;
+}) {
   const [collapsed, setCollapsed] = useState(false),
     [drawer, setDrawer] = useState(false);
   const sidebar = (
@@ -95,9 +108,26 @@ export function Layout({ me, children }: { me: Me; children: React.ReactNode }) 
             <b>
               {me.user.firstName} {me.user.lastName}
             </b>
-            <small className="block text-slate-500">
-              {me.branch?.name ?? 'Todas las sucursales'} · {me.user.roles.map((r) => r.code).join(', ')}
-            </small>
+            <div className="flex items-center justify-end gap-2 text-sm text-slate-500">
+              {branches.length > 1 ? (
+                <select
+                  className="h-9 border-0 bg-transparent py-0 text-right text-sm"
+                  value={currentBranchId ?? ''}
+                  onChange={(event) => void onBranchChange(event.target.value || undefined)}
+                  aria-label="Sucursal actual"
+                >
+                  {!me.branch && <option value="">Todas las sucursales</option>}
+                  {branches.map((branch) => (
+                    <option value={branch.id} key={branch.id}>
+                      {branch.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span>{branches[0]?.name ?? me.branch?.name ?? 'Sin sucursal activa'}</span>
+              )}
+              <span>· {me.user.roles.map((r) => r.code).join(', ')}</span>
+            </div>
           </div>
         </header>
         <main className="p-4 sm:p-5 lg:p-8">{children}</main>

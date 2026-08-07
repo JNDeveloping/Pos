@@ -34,22 +34,23 @@ async function main() {
     update: {},
     create: { name: 'El Rincón de los Nietos', legalName: 'El Rincón de los Nietos', cuit: '30-00000000-0' },
   });
-  const branches = await Promise.all(
-    ['Sucursal 1', 'Sucursal 2', 'Sucursal 3'].map((name, i) =>
-      db.branch.upsert({
-        where: { companyId_code: { companyId: company.id, code: `SUC-${i + 1}` } },
-        update: {},
-        create: {
-          companyId: company.id,
-          name,
-          code: `SUC-${i + 1}`,
-          address: `Dirección editable ${i + 1}`,
-          city: 'Ciudad',
-          province: 'Buenos Aires',
-        },
-      }),
-    ),
-  );
+  const principalBranch = await db.branch.upsert({
+    where: { companyId_code: { companyId: company.id, code: 'SUC-001' } },
+    update: { name: 'Sucursal Principal', active: true, deletedAt: null },
+    create: {
+      companyId: company.id,
+      name: 'Sucursal Principal',
+      code: 'SUC-001',
+      address: 'Dirección editable',
+      city: 'Ciudad',
+      province: 'Buenos Aires',
+    },
+  });
+  // Remove only the legacy demo branches created by earlier development seeds.
+  await db.branch.updateMany({
+    where: { companyId: company.id, code: { in: ['SUC-1', 'SUC-2', 'SUC-3'] } },
+    data: { active: false, deletedAt: new Date() },
+  });
   const permissions = await Promise.all(
     permissionCodes.map((code) =>
       db.permission.upsert({
@@ -165,14 +166,16 @@ async function main() {
       },
     });
     await db.branchProduct.createMany({
-      data: branches.map((b) => ({
-        branchId: b.id,
-        productId: p.id,
-        cost: d.cost,
-        salePrice: d.price,
-        margin: 50,
-        stockMinimum: 10,
-      })),
+      data: [
+        {
+          branchId: principalBranch.id,
+          productId: p.id,
+          cost: d.cost,
+          salePrice: d.price,
+          margin: 50,
+          stockMinimum: 10,
+        },
+      ],
       skipDuplicates: true,
     });
   }
