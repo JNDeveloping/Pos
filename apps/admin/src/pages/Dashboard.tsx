@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import { Building2, FolderTree, Package, PackageCheck, Tags, Users } from 'lucide-react';
 import { api } from '../lib/api';
 import { offlineDb } from '../offline/db/database';
+import { deviceConfig } from '../offline/db/device';
 type S = {
   products: number;
   activeProducts: number;
@@ -11,13 +12,16 @@ type S = {
   categories: number;
   productsWithoutPrice: number;
   productsWithoutBranchConfig: number;
+  enabledInBranch: number;
 };
 export function Dashboard() {
   const [s, setS] = useState<S>();
   useEffect(() => {
-    api<S>('/dashboard/summary')
-      .then(setS)
-      .catch(async () => {
+    async function load() {
+      const device = await deviceConfig();
+      try {
+        setS(await api<S>(`/dashboard/summary${device.branchId ? `?branchId=${device.branchId}` : ''}`));
+      } catch {
         const [products, activeProducts, activeBranches, categories] = await Promise.all([
           offlineDb.products.count(),
           offlineDb.products.filter((product) => product.active).count(),
@@ -34,12 +38,17 @@ export function Dashboard() {
             .filter((config) => Number(config.salePrice) === 0)
             .count(),
           productsWithoutBranchConfig: 0,
+          enabledInBranch: await offlineDb.branchProducts
+            .filter((config) => config.enabled && (!device.branchId || config.branchId === device.branchId))
+            .count(),
         });
-      });
+      }
+    }
+    void load();
   }, []);
   const cards: [string, number | undefined, LucideIcon][] = [
-    ['Productos', s?.products, Package],
-    ['Productos activos', s?.activeProducts, PackageCheck],
+    ['Productos en catálogo', s?.products, Package],
+    ['Productos habilitados en sucursal', s?.enabledInBranch, PackageCheck],
     ['Sucursales activas', s?.activeBranches, Building2],
     ['Usuarios activos', s?.activeUsers, Users],
     ['Categorías', s?.categories, FolderTree],

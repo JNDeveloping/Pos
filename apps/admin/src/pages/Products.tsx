@@ -1,10 +1,19 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, PackagePlus, Search, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileSpreadsheet, PackagePlus, Search, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { offlineDb } from '../offline/db/database';
+import { deviceConfig } from '../offline/db/device';
 import { catalogRepository } from '../offline/repositories/catalog.repository';
 type Ref = { id: string; name: string };
-type Config = { id: string; cost: string; salePrice: string; margin: string; stockMinimum: string; branch: Ref };
+type Config = {
+  id: string;
+  cost: string;
+  salePrice: string;
+  margin: string;
+  stockMinimum: string;
+  enabled: boolean;
+  branch: Ref;
+};
 type Product = {
   id: string;
   internalCode: string;
@@ -14,29 +23,46 @@ type Product = {
   brand?: Ref;
   branchConfigs: Config[];
   barcodes: { barcode: string }[];
+  _count?: { branchConfigs: number };
 };
 type Page = { data: Product[]; meta: { page: number; pages: number; total: number } };
-export function Products() {
+export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
   const [result, setResult] = useState<Page>(),
     [search, setSearch] = useState(''),
     [page, setPage] = useState(1),
     [show, setShow] = useState(false),
     [categories, setCategories] = useState<Ref[]>([]),
     [brands, setBrands] = useState<Ref[]>([]),
-    [branches, setBranches] = useState<Ref[]>([]);
+    [branches, setBranches] = useState<Ref[]>([]),
+    [branchId, setBranchId] = useState<string>(),
+    [enabledFilter, setEnabledFilter] = useState<'all' | 'true' | 'false'>(mode === 'branch' ? 'true' : 'all'),
+    [enableDuringImport, setEnableDuringImport] = useState(mode === 'branch'),
+    [importing, setImporting] = useState('');
   const load = async () => {
     try {
-      setResult(await api<Page>(`/products?search=${encodeURIComponent(search)}&page=${page}&limit=20`));
+      const params = new URLSearchParams({ search, page: String(page), limit: '20' });
+      if (branchId && enabledFilter !== 'all') {
+        params.set('branchId', branchId);
+        params.set('enabled', enabledFilter);
+      }
+      setResult(await api<Page>(`/products?${params}`));
     } catch {
       const all = (await catalogRepository.productViews()) as unknown as Product[];
       const term = search.toLocaleLowerCase('es');
-      const filtered = all.filter(
-        (product) =>
-          !term ||
-          product.name.toLocaleLowerCase('es').includes(term) ||
-          product.internalCode.toLocaleLowerCase('es').includes(term) ||
-          product.barcodes.some((barcode) => barcode.barcode.includes(term)),
-      );
+      const filtered = all
+        .filter(
+          (product) =>
+            !term ||
+            product.name.toLocaleLowerCase('es').includes(term) ||
+            product.internalCode.toLocaleLowerCase('es').includes(term) ||
+            product.barcodes.some((barcode) => barcode.barcode.includes(term)),
+        )
+        .filter(
+          (product) =>
+            enabledFilter === 'all' ||
+            !branchId ||
+            product.branchConfigs.some((x) => x.branch.id === branchId && x.enabled) === (enabledFilter === 'true'),
+        );
       setResult({
         data: filtered.slice((page - 1) * 20, page * 20),
         meta: { page, pages: Math.ceil(filtered.length / 20), total: filtered.length },
@@ -45,7 +71,7 @@ export function Products() {
   };
   useEffect(() => {
     void load();
-  }, [page]);
+  }, [page, branchId, enabledFilter, mode]);
   useEffect(() => {
     Promise.all([
       api<Ref[]>('/categories').catch(() => offlineDb.categories.toArray()),
@@ -56,6 +82,7 @@ export function Products() {
       setBrands(b);
       setBranches(br);
     });
+    void deviceConfig().then((device) => setBranchId(device.branchId));
   }, []);
   async function create(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -71,7 +98,7 @@ export function Products() {
         taxRate: f.get('taxRate'),
       }),
     });
-    for (const b of branches) {
+    for (const b of branches.filter((branch) => branch.id === branchId)) {
       const cost = String(f.get(`cost-${b.id}`) || '0'),
         salePrice = String(f.get(`price-${b.id}`) || '0');
       await api(`/products/${p.id}/branches/${b.id}`, {
@@ -85,18 +112,102 @@ export function Products() {
     setShow(false);
     load();
   }
+  async function importExcel(file: File) {
+    const { read, utils } = await import('xlsx');
+    const started = performance.now();
+    const workbook = read(await file.arrayBuffer());
+    const rows = utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[workbook.SheetNames[0]]);
+    const normalized = rows
+      .map((row) => ({
+        codigo: String(row.Codigo ?? row.CODIGO ?? '').trim(),
+        descripcion: String(row.Descripcion ?? row.DESCRIPCION ?? '').trim(),
+        rubro: String(row.Rubro ?? row.RUBRO ?? 'SIN CLASIFICAR').trim(),
+      }))
+      .filter((row) => row.codigo && row.descripcion);
+    if (!normalized.length) throw new Error('No se detectaron las columnas Codigo y Descripcion');
+    const total = {
+      created: 0,
+      updated: 0,
+      categoriesCreated: 0,
+      brandsCreated: 0,
+      skipped: 0,
+      warnings: 0,
+      errors: 0,
+    };
+    for (let offset = 0; offset < normalized.length; offset += 500) {
+      setImporting(
+        `Importando… ${Math.min(offset + 500, normalized.length).toLocaleString('es-AR')} / ${normalized.length.toLocaleString('es-AR')}`,
+      );
+      const result = await api<{
+        created: number;
+        updated: number;
+        categoriesCreated: number;
+        brandsCreated: number;
+        skipped: number;
+        warnings: string[];
+        errors: string[];
+      }>('/products/import', {
+        method: 'POST',
+        body: JSON.stringify({
+          rows: normalized.slice(offset, offset + 500),
+          branchId,
+          enableForBranch: enableDuringImport,
+        }),
+      });
+      total.created += result.created;
+      total.updated += result.updated;
+      total.categoriesCreated += result.categoriesCreated;
+      total.brandsCreated += result.brandsCreated;
+      total.skipped += result.skipped;
+      total.warnings += result.warnings.length;
+      total.errors += result.errors.length;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    setImporting(
+      `Finalizado en ${((performance.now() - started) / 1000).toFixed(1)} s · Nuevos ${total.created} · Actualizados ${total.updated} · Categorías ${total.categoriesCreated} · Marcas ${total.brandsCreated} · Omitidos ${total.skipped} · Advertencias ${total.warnings} · Errores ${total.errors}`,
+    );
+    await load();
+  }
   return (
     <>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Productos</h1>
-          <p className="mt-2 text-slate-500">Catálogo y configuración comercial por sucursal.</p>
+          <h1 className="text-3xl font-bold">{mode === 'master' ? 'Catálogo maestro' : 'Productos de la sucursal'}</h1>
+          <p className="mt-2 text-slate-500">
+            {mode === 'master'
+              ? 'Todos los artículos conocidos, estén habilitados o no.'
+              : 'Sólo artículos comercializados y su configuración local.'}
+          </p>
         </div>
-        <button className="btn" onClick={() => setShow(true)}>
-          <PackagePlus size={19} />
-          Nuevo producto
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <label className="btn-secondary cursor-pointer">
+            <FileSpreadsheet size={18} /> Importar Excel
+            <input
+              className="hidden"
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importExcel(file).catch((error) => setImporting(error.message));
+              }}
+            />
+          </label>
+          <button className="btn" onClick={() => setShow(true)}>
+            <PackagePlus size={19} />
+            Nuevo producto
+          </button>
+        </div>
       </div>
+      {importing && <p className="mt-4 rounded-xl bg-brand-50 p-4 text-sm text-brand-800">{importing}</p>}
+      <label className="mt-4 flex min-h-11 items-center gap-3 text-sm font-medium">
+        <input
+          type="checkbox"
+          checked={enableDuringImport}
+          disabled={!branchId}
+          onChange={(event) => setEnableDuringImport(event.target.checked)}
+        />
+        Importar al catálogo y habilitar automáticamente para la sucursal actual
+      </label>
       <form
         className="card mt-7 flex gap-3 p-4"
         onSubmit={(e) => {
@@ -113,23 +224,39 @@ export function Products() {
           onChange={(e) => setSearch(e.target.value)}
         />
         <button className="btn-secondary">Buscar</button>
+        {branchId && (
+          <select
+            value={enabledFilter}
+            onChange={(e) => {
+              setEnabledFilter(e.target.value as typeof enabledFilter);
+              setPage(1);
+            }}
+          >
+            <option value="all">Todos</option>
+            <option value="true">
+              Habilitado en {branches.find((branch) => branch.id === branchId)?.name ?? 'sucursal'}
+            </option>
+            <option value="false">No habilitado</option>
+          </select>
+        )}
       </form>
       <div className="card mt-5 overflow-x-auto">
         <table className="w-full whitespace-nowrap text-left text-sm">
           <thead className="border-b bg-slate-50 text-xs uppercase text-slate-500">
             <tr>
-              {['Código', 'Producto', 'Categoría', 'Marca', 'Precio', 'Costo', 'Margen', 'Estado', 'Acciones'].map(
-                (x) => (
-                  <th className="p-4" key={x}>
-                    {x}
-                  </th>
-                ),
-              )}
+              {(mode === 'master'
+                ? ['Código', 'Producto', 'Categoría', 'Marca', 'Sucursales', 'Estado', 'Acciones']
+                : ['Código', 'Producto', 'Categoría', 'Marca', 'Precio', 'Costo', 'Margen', 'Estado', 'Acciones']
+              ).map((x) => (
+                <th className="p-4" key={x}>
+                  {x}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {result?.data.map((p) => {
-              const c = p.branchConfigs[0];
+              const c = branchId ? p.branchConfigs.find((config) => config.branch.id === branchId) : p.branchConfigs[0];
               return (
                 <tr className="border-b last:border-0" key={p.id}>
                   <td className="p-4 font-mono">{p.internalCode}</td>
@@ -139,9 +266,17 @@ export function Products() {
                   </td>
                   <td className="p-4">{p.category.name}</td>
                   <td className="p-4">{p.brand?.name ?? '—'}</td>
-                  <td className="p-4 font-semibold">$ {Number(c?.salePrice ?? 0).toLocaleString('es-AR')}</td>
-                  <td className="p-4">$ {Number(c?.cost ?? 0).toLocaleString('es-AR')}</td>
-                  <td className="p-4">{c?.margin ?? 0}%</td>
+                  {mode === 'master' ? (
+                    <td className="p-4">
+                      {p._count?.branchConfigs ?? p.branchConfigs.filter((x) => x.enabled).length}
+                    </td>
+                  ) : (
+                    <>
+                      <td className="p-4 font-semibold">$ {Number(c?.salePrice ?? 0).toLocaleString('es-AR')}</td>
+                      <td className="p-4">$ {Number(c?.cost ?? 0).toLocaleString('es-AR')}</td>
+                      <td className="p-4">{c?.margin ?? 0}%</td>
+                    </>
+                  )}
                   <td className="p-4">
                     <span className="badge">{p.active ? 'Activo' : 'Inactivo'}</span>
                   </td>
@@ -155,6 +290,20 @@ export function Products() {
                       >
                         Ver
                       </button>
+                      {branchId &&
+                        !p.branchConfigs.some((config) => config.branch.id === branchId && config.enabled) && (
+                          <button
+                            className="text-brand-600"
+                            onClick={() =>
+                              api(`/products/${p.id}/branches/${branchId}`, {
+                                method: 'PATCH',
+                                body: JSON.stringify({ enabled: true }),
+                              }).then(load)
+                            }
+                          >
+                            Agregar a sucursal
+                          </button>
+                        )}
                       <button
                         className="text-brand-600"
                         onClick={() => {
@@ -201,7 +350,9 @@ export function Products() {
             <div className="flex justify-between">
               <div>
                 <h2 className="text-2xl font-bold">Nuevo producto</h2>
-                <p className="text-slate-500">Datos generales y valores por sucursal.</p>
+                <p className="text-slate-500">
+                  Se crea en el catálogo maestro y se habilita sólo en la sucursal actual.
+                </p>
               </div>
               <button type="button" onClick={() => setShow(false)}>
                 <X />
@@ -235,16 +386,18 @@ export function Products() {
             </div>
             <h3 className="mt-8 font-bold">Configuración por sucursal</h3>
             <div className="mt-3 grid gap-3">
-              {branches.map((b) => (
-                <fieldset className="rounded-xl border p-4" key={b.id}>
-                  <legend className="px-2 font-semibold">{b.name}</legend>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <input name={`cost-${b.id}`} type="number" min="0" step="0.01" placeholder="Costo" />
-                    <input name={`price-${b.id}`} type="number" min="0" step="0.01" placeholder="Precio" />
-                    <input name={`stock-${b.id}`} type="number" min="0" step="0.001" placeholder="Stock mínimo" />
-                  </div>
-                </fieldset>
-              ))}
+              {branches
+                .filter((branch) => branch.id === branchId)
+                .map((b) => (
+                  <fieldset className="rounded-xl border p-4" key={b.id}>
+                    <legend className="px-2 font-semibold">{b.name}</legend>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <input name={`cost-${b.id}`} type="number" min="0" step="0.01" placeholder="Costo" />
+                      <input name={`price-${b.id}`} type="number" min="0" step="0.01" placeholder="Precio" />
+                      <input name={`stock-${b.id}`} type="number" min="0" step="0.001" placeholder="Stock mínimo" />
+                    </div>
+                  </fieldset>
+                ))}
             </div>
             <div className="mt-7 flex justify-end gap-3">
               <button type="button" className="btn-secondary" onClick={() => setShow(false)}>

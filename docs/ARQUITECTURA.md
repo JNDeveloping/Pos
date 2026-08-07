@@ -36,6 +36,18 @@ La creación permite copiar desde otra sucursal productos habilitados, costos, p
 Esta copia sólo genera configuraciones `BranchProduct`: nunca copia existencias físicas. El stock operativo futuro
 seguirá siendo una magnitud por `branchId + productId`.
 
+## Catálogo maestro y surtido
+
+`Product` representa el catálogo maestro de la empresa y sólo conserva identidad y clasificación global. La mera
+existencia de un producto no lo habilita comercialmente. `BranchProduct` representa el surtido de una sucursal y
+es la única ubicación para `cost`, `salePrice`, `margin`, `stockMinimum` y `enabled`; si la relación no existe, la
+sucursal no comercializa ese artículo.
+
+La importación Excel detecta `Codigo`, `Descripcion` y `Rubro`, procesa lotes de hasta 500 filas y puede limitarse al
+catálogo o crear el surtido de la sucursal actual con valores comerciales en cero. Los códigos numéricos no EAN-13
+se admiten con advertencia. Las categorías se normalizan antes del alta para evitar variantes por mayúsculas o
+acentos. PostgreSQL continúa imponiendo la unicidad de códigos y la PWA conserva `BranchProduct` en IndexedDB.
+
 ## Entrega incremental
 
 1. **Núcleo:** identidad/RBAC, empresa, sucursales, categorías, marcas, productos y configuración por sucursal.

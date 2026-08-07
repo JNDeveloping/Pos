@@ -16,6 +16,7 @@ import {
 import { Prisma, UnitType } from '@prisma/client';
 import {
   IsBoolean,
+  IsArray,
   IsEnum,
   IsInt,
   IsNumberString,
@@ -25,12 +26,16 @@ import {
   Length,
   Max,
   Min,
+  Matches,
+  ArrayMaxSize,
+  ValidateNested,
 } from 'class-validator';
 import { CurrentSession, RequirePermissions, Session } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
 class ProductDto {
   @IsString() @Length(2, 50) internalCode!: string;
   @IsString() @Length(2, 180) name!: string;
+  @IsOptional() @IsString() @Length(1, 80) shortName?: string;
   @IsUUID() categoryId!: string;
   @IsOptional() @IsUUID() brandId?: string;
   @IsOptional() @IsString() description?: string;
@@ -41,6 +46,7 @@ class ProductDto {
 class ProductPatchDto {
   @IsOptional() @IsString() @Length(2, 50) internalCode?: string;
   @IsOptional() @IsString() @Length(2, 180) name?: string;
+  @IsOptional() @IsString() @Length(1, 80) shortName?: string;
   @IsOptional() @IsUUID() categoryId?: string;
   @IsOptional() @IsUUID() brandId?: string;
   @IsOptional() @IsString() description?: string;
@@ -50,7 +56,7 @@ class ProductPatchDto {
   @IsOptional() @IsBoolean() active?: boolean;
 }
 class BarcodeDto {
-  @IsString() @Length(4, 64) barcode!: string;
+  @IsString() @Length(1, 64) @Matches(/^\d+$/, { message: 'El código debe ser numérico' }) barcode!: string;
   @IsOptional() @IsBoolean() isPrimary?: boolean;
 }
 class ConfigDto {
@@ -65,9 +71,20 @@ class ListQuery {
   @IsOptional() @IsUUID() categoryId?: string;
   @IsOptional() @IsUUID() brandId?: string;
   @IsOptional() @IsUUID() branchId?: string;
+  @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() enabled?: boolean;
   @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() active?: boolean;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 20;
+}
+class ImportRowDto {
+  @IsString() @Length(1, 64) codigo!: string;
+  @IsString() @Length(2, 180) descripcion!: string;
+  @IsString() @Length(1, 100) rubro!: string;
+}
+class ImportBatchDto {
+  @IsArray() @ArrayMaxSize(500) @ValidateNested({ each: true }) @Type(() => ImportRowDto) rows!: ImportRowDto[];
+  @IsOptional() @IsUUID() branchId?: string;
+  @IsOptional() @IsBoolean() enableForBranch?: boolean;
 }
 @ApiTags('Productos')
 @Controller('products')
@@ -78,6 +95,7 @@ class ProductsController {
     brand: true,
     barcodes: true,
     branchConfigs: { include: { branch: true } },
+    _count: { select: { branchConfigs: { where: { enabled: true } } } },
   } as const;
   @Get() @RequirePermissions('products.view') async list(@CurrentSession() s: Session, @Query() q: ListQuery) {
     const where: Prisma.ProductWhereInput = {
@@ -86,7 +104,15 @@ class ProductsController {
       ...(q.active !== undefined ? { active: q.active } : {}),
       ...(q.categoryId ? { categoryId: q.categoryId } : {}),
       ...(q.brandId ? { brandId: q.brandId } : {}),
-      ...(q.branchId ? { branchConfigs: { some: { branchId: q.branchId } } } : {}),
+      ...(q.branchId && q.enabled !== undefined
+        ? {
+            branchConfigs: q.enabled
+              ? { some: { branchId: q.branchId, enabled: true } }
+              : { none: { branchId: q.branchId, enabled: true } },
+          }
+        : q.branchId
+          ? { branchConfigs: { some: { branchId: q.branchId } } }
+          : {}),
       ...(q.search
         ? {
             OR: [
@@ -119,14 +145,90 @@ class ProductsController {
   }
   @Post() @RequirePermissions('products.create') async create(@CurrentSession() s: Session, @Body() d: ProductDto) {
     await this.validateRefs(s, d.categoryId, d.brandId);
-    return this.db.$transaction(async (tx) => {
-      const p = await tx.product.create({
-        data: { ...d, taxRate: new Prisma.Decimal(d.taxRate), companyId: s.companyId },
+    return this.db.product.create({ data: { ...d, taxRate: new Prisma.Decimal(d.taxRate), companyId: s.companyId } });
+  }
+  @Post('import') @RequirePermissions('products.create') async importBatch(
+    @CurrentSession() s: Session,
+    @Body() d: ImportBatchDto,
+  ) {
+    if (d.enableForBranch && !d.branchId) throw new BadRequestException('Debe indicar la sucursal a habilitar');
+    if (d.branchId) {
+      const branch = await this.db.branch.findFirst({
+        where: { id: d.branchId, companyId: s.companyId, active: true, deletedAt: null },
       });
-      const branches = await tx.branch.findMany({ where: { companyId: s.companyId, active: true, deletedAt: null } });
-      await tx.branchProduct.createMany({ data: branches.map((b) => ({ branchId: b.id, productId: p.id })) });
-      return p;
-    });
+      if (!branch) throw new NotFoundException('Sucursal no encontrada');
+    }
+    const result = {
+      created: 0,
+      updated: 0,
+      categoriesCreated: 0,
+      brandsCreated: 0,
+      skipped: 0,
+      warnings: [] as string[],
+      errors: [] as string[],
+    };
+    for (const row of d.rows) {
+      const barcode = row.codigo.trim();
+      if (!/^\d+$/.test(barcode)) {
+        result.skipped++;
+        result.errors.push(`${barcode}: el código debe ser numérico`);
+        continue;
+      }
+      if (!/^\d{13}$/.test(barcode)) result.warnings.push(`${barcode}: código comercial no EAN-13`);
+      try {
+        await this.db.$transaction(async (tx) => {
+          const categoryName = this.normalizeCategory(row.rubro);
+          const categoryKey = this.categoryKey(row.rubro);
+          let category = await tx.category.findFirst({
+            where: {
+              companyId: s.companyId,
+              parentId: null,
+              deletedAt: null,
+              name: { in: [categoryName, categoryKey], mode: 'insensitive' },
+            },
+          });
+          if (!category) {
+            category = await tx.category.create({ data: { companyId: s.companyId, name: categoryName } });
+            result.categoriesCreated++;
+          } else if (category.name !== categoryName) {
+            category = await tx.category.update({ where: { id: category.id }, data: { name: categoryName } });
+          }
+          const barcodeRecord = await tx.productBarcode.findUnique({
+            where: { companyId_barcode: { companyId: s.companyId, barcode } },
+            include: { product: true },
+          });
+          let product;
+          if (barcodeRecord) {
+            product = await tx.product.update({
+              where: { id: barcodeRecord.productId },
+              data: { name: row.descripcion.trim(), categoryId: category.id, active: true, deletedAt: null },
+            });
+            result.updated++;
+          } else {
+            product = await tx.product.create({
+              data: {
+                companyId: s.companyId,
+                internalCode: barcode,
+                name: row.descripcion.trim(),
+                categoryId: category.id,
+                barcodes: { create: { companyId: s.companyId, barcode, isPrimary: true } },
+              },
+            });
+            result.created++;
+          }
+          if (d.enableForBranch && d.branchId)
+            await tx.branchProduct.upsert({
+              where: { branchId_productId: { branchId: d.branchId, productId: product.id } },
+              create: { branchId: d.branchId, productId: product.id, enabled: true },
+              update: { enabled: true },
+            });
+        });
+      } catch (error) {
+        result.skipped++;
+        result.errors.push(`${barcode}: ${error instanceof Error ? error.message : 'error de importación'}`);
+      }
+    }
+    return result;
   }
   @Patch(':id') @RequirePermissions('products.update') async update(
     @CurrentSession() s: Session,
@@ -262,6 +364,29 @@ class ProductsController {
     const n = new Prisma.Decimal(v);
     if (n.lt(0)) throw new BadRequestException('Los importes no pueden ser negativos');
     return n.toDecimalPlaces(2);
+  }
+  private normalizeCategory(value: string) {
+    const key = this.categoryKey(value);
+    return (
+      (
+        {
+          ALMACEN: 'ALMACÉN',
+          PERFUMERIA: 'PERFUMERÍA',
+          LACTEOS: 'LÁCTEOS',
+          'SIN CLASIFICAR': 'SIN CLASIFICAR',
+        } as Record<string, string>
+      )[key] ?? key
+    );
+  }
+  private categoryKey(value: string) {
+    return (
+      value
+        .trim()
+        .replace(/^-+|-+$/g, '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase() || 'SIN CLASIFICAR'
+    );
   }
   private async owned(s: Session, id: string) {
     const p = await this.db.product.findFirst({ where: { id, companyId: s.companyId, deletedAt: null } });

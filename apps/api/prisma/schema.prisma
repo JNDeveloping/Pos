@@ -251,6 +251,7 @@ model Product {
   brand         Brand?           @relation(fields: [brandId], references: [id])
   internalCode  String
   name          String
+  shortName     String?
   description   String?
   unitType      UnitType         @default(UNIT)
   taxRate       Decimal          @default(21) @db.Decimal(5, 2)

@@ -64,16 +64,99 @@ class SyncController {
     });
     const hasMore = rows.length > query.limit;
     const page = hasMore ? rows.slice(0, query.limit) : rows;
-    const changes = page.map((row) => ({
-      version: row.version.toString(),
-      entityType: row.entityType,
-      entityId: row.entityId,
-      operation: row.operation,
-      payload: row.payload,
-      createdAt: row.createdAt,
-    }));
+    let scopedPage = page;
+    const hydrated: {
+      version: bigint;
+      entityType: 'PRODUCT' | 'PRODUCT_BARCODE';
+      entityId: string;
+      operation: 'UPSERT';
+      payload: Prisma.JsonValue;
+      createdAt: Date;
+    }[] = [];
+    if (query.branchId) {
+      const productIds = page.filter((row) => row.entityType === 'PRODUCT').map((row) => row.entityId);
+      const barcodeProductIds = page
+        .filter(
+          (row) =>
+            row.entityType === 'PRODUCT_BARCODE' &&
+            row.payload &&
+            typeof row.payload === 'object' &&
+            !Array.isArray(row.payload),
+        )
+        .map((row) => String((row.payload as Prisma.JsonObject).productId));
+      const allowed = new Set(
+        (
+          await this.db.branchProduct.findMany({
+            where: {
+              branchId: query.branchId,
+              enabled: true,
+              productId: { in: [...productIds, ...barcodeProductIds] },
+            },
+            select: { productId: true },
+          })
+        ).map((item) => item.productId),
+      );
+      scopedPage = page.filter((row) => {
+        if (row.entityType === 'PRODUCT') return allowed.has(row.entityId);
+        if (
+          row.entityType === 'PRODUCT_BARCODE' &&
+          row.payload &&
+          typeof row.payload === 'object' &&
+          !Array.isArray(row.payload)
+        )
+          return allowed.has(String((row.payload as Prisma.JsonObject).productId));
+        return true;
+      });
+      const enableEvents = page
+        .filter((item) => item.entityType === 'BRANCH_PRODUCT')
+        .map((row) => ({ row, payload: row.payload as Prisma.JsonObject | null }))
+        .filter(({ payload }) => payload?.enabled === true);
+      const products = await this.db.product.findMany({
+        where: {
+          id: { in: enableEvents.map(({ payload }) => String(payload?.productId)) },
+          companyId: session.companyId,
+          active: true,
+          deletedAt: null,
+        },
+        include: { barcodes: true },
+      });
+      const productsById = new Map(products.map((product) => [product.id, product]));
+      for (const { row, payload } of enableEvents) {
+        const product = productsById.get(String(payload?.productId));
+        if (!product) continue;
+        const { barcodes, ...productPayload } = product;
+        hydrated.push({
+          version: row.version,
+          entityType: 'PRODUCT',
+          entityId: product.id,
+          operation: 'UPSERT',
+          payload: productPayload as unknown as Prisma.JsonValue,
+          createdAt: row.createdAt,
+        });
+        hydrated.push(
+          ...barcodes.map((barcode) => ({
+            version: row.version,
+            entityType: 'PRODUCT_BARCODE' as const,
+            entityId: barcode.id,
+            operation: 'UPSERT' as const,
+            payload: barcode as unknown as Prisma.JsonValue,
+            createdAt: row.createdAt,
+          })),
+        );
+      }
+    }
+    const changes = [...scopedPage, ...hydrated]
+      .sort((a, b) => Number(a.version - b.version))
+      .map((row) => ({
+        version: row.version.toString(),
+        entityType: row.entityType,
+        entityId: row.entityId,
+        operation: row.operation,
+        payload: row.payload,
+        createdAt: row.createdAt,
+      }));
     return {
-      cursor: changes.at(-1)?.version ?? query.cursor,
+      cursor: page.at(-1)?.version.toString() ?? query.cursor,
       hasMore,
       changes,
       serverTime: new Date().toISOString(),

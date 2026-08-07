@@ -21,6 +21,7 @@ const pages: Record<string, React.ReactNode> = {
   '/brands': <SimpleCrud title="Marcas" path="/brands" />,
   '/users': <Users />,
   '/products': <Products />,
+  '/catalog': <Products mode="master" />,
   '/roles': <SimpleCrud title="Roles y permisos" path="/roles" readOnly />,
   '/settings': <Diagnostics />,
 };
