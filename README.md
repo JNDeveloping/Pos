@@ -1,46 +1,59 @@
-# El Rincón de los Nietos · Plataforma POS
+# El Rincón de los Nietos — Etapa 1
 
-Base funcional de la **etapa 1** de una plataforma multiempresa/multisucursal para Argentina. Incluye API NestJS, PostgreSQL/Prisma, autenticación JWT con renovación, RBAC configurable, empresa, tres sucursales, usuarios y catálogo con precio por sucursal; además de un panel React en español.
+Monorepo funcional para la administración central multiempresa y multisucursal. Esta entrega contiene exclusivamente el núcleo solicitado: identidad/RBAC, empresa, sucursales, usuarios, categorías, marcas, productos, códigos de barra, precios/costos por sucursal e historiales automáticos. **No incluye ventas, caja, stock operativo, Electron ni sincronización.**
 
-La arquitectura completa, sus límites y el plan incremental están documentados en [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md). No se incluyeron ventas, cajas ni sincronización offline: pertenecen a las etapas 2 y 3 y se construirán sobre este núcleo validado.
+## Estructura
+```text
+apps/api/       NestJS, Prisma, PostgreSQL y Redis
+apps/admin/     React, Vite y Tailwind CSS
+apps/pos/       reserva documentada; se implementará en etapa 3
+packages/shared/ contratos futuros, sin abstracciones prematuras
+infra/          reservado para despliegue posterior
+docs/           arquitectura y decisiones
+```
 
-## Requisitos
-- Node.js 22+
-- npm 11+
-- Docker con Compose (recomendado), o PostgreSQL 16 y Redis 7
+## Requisitos y variables
+- Node.js 22+, npm 11+, PostgreSQL 16 y Redis 7; o Docker Compose.
+- Copiar `.env.example` a `.env`. `SEED_ADMIN_PASSWORD` es obligatoria, debe tener 10 caracteres o más y no tiene valor seguro para producción.
+- Los secretos JWT deben ser distintos y tener al menos 32 caracteres.
 
-## Inicio local
+## Instalación local
 ```bash
 cp .env.example .env
 npm install
+# Con Docker disponible:
 docker compose up -d postgres redis
 npm run prisma:generate
-npm run db:push
+npm run db:deploy
 npm run db:seed
 npm run dev:api
-# En otra terminal:
+# otra terminal
 npm run dev:admin
 ```
+El admin abre en `http://localhost:5173`; Swagger está en `http://localhost:3000/api/docs` fuera de producción. El usuario inicial es `admin` y la contraseña es exactamente el valor configurado en `SEED_ADMIN_PASSWORD`.
 
-Abrir `http://localhost:5173`. El seed crea `admin`; su contraseña toma `SEED_ADMIN_PASSWORD` (por defecto local: `Cambiar123!`). Debe cambiarse fuera de desarrollo.
+## Calidad
+```bash
+npm run build
+npm run lint
+npm run typecheck
+npm test
+```
 
-## Comandos
-| Comando | Uso |
-|---|---|
-| `npm run build` | Compila API y administración |
-| `npm run typecheck` | Verifica TypeScript en todo el workspace |
-| `npm test` | Ejecuta las pruebas disponibles |
-| `npm run db:push` | Sincroniza el esquema durante desarrollo |
-| `npm run db:seed` | Carga datos iniciales de manera repetible |
+## Endpoints principales
+- Autenticación: `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/me`.
+- Dashboard: `GET /api/dashboard/summary`.
+- Sucursales: CRUD lógico en `/api/branches`.
+- Usuarios: CRUD lógico en `/api/users`; roles y permisos en `/api/roles`.
+- Categorías y marcas: CRUD lógico en `/api/categories` y `/api/brands`.
+- Productos: CRUD y filtros paginados en `/api/products`.
+- Códigos: `GET|POST /api/products/:id/barcodes` y `DELETE /api/products/:id/barcodes/:barcodeId`.
+- Configuración: `GET /api/products/:id/branches` y `PATCH /api/products/:id/branches/:branchId`.
+- Historiales: `GET /api/products/:id/price-history` y `GET /api/products/:id/cost-history`.
 
-En producción se deben generar y revisar migraciones versionadas con `prisma migrate deploy`; `db push` sólo se propone para el arranque de desarrollo. La API expone salud en `GET /api/health` y sus rutas iniciales autenticadas son `/api/company`, `/api/branches`, `/api/users`, `/api/categories` y `/api/products`.
+Los precios, costos y márgenes se recalculan en backend dentro de una transacción. Cambiar precio o costo de una configuración existente crea su historial con usuario, producto y sucursal. Los borrados de maestros son lógicos.
 
-## Seguridad y datos
-- Copiar `.env.example`; nunca versionar `.env`.
-- Usar secretos JWT diferentes de al menos 32 caracteres.
-- Las contraseñas y refresh tokens se guardan con Argon2.
-- El backend deriva empresa/sucursal/permisos del JWT y no acepta un tenant arbitrario del navegador.
-- Importes persistidos usan `Decimal`; las fechas se guardan en UTC.
+## Base de datos y producción
+La migración inicial versionada se encuentra en `apps/api/prisma/migrations`. Desarrollo nuevo usa `npm run db:migrate`; despliegues usan `npm run db:deploy`. PostgreSQL persiste dinero como `Decimal` y fechas UTC; la UI presenta ARS y la empresa usa `America/Argentina/Buenos_Aires`.
 
-## Docker y despliegue
-`docker compose up --build` levanta PostgreSQL, Redis y la API. Antes de un despliegue en Ubuntu/VPS: usar secretos externos, TLS en Nginx, ejecutar migraciones, limitar puertos de datos a la red privada y configurar backups con `pg_dump`/`pg_restore`. Redis queda preparado como dependencia de infraestructura; se conectará a colas y caché al introducir casos de uso que lo necesiten, evitando código sin función en esta etapa.
+`docker-compose.yml` ofrece PostgreSQL, Redis y API con volúmenes persistentes. Para VPS se deben reemplazar secretos, usar TLS/Nginx, no publicar las bases, ejecutar migraciones antes del arranque y automatizar backups.

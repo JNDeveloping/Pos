@@ -32,3 +32,6 @@ docs/        decisiones y plan
 7. **Inteligencia:** pronóstico estadístico, compra/reposición, rebalanceo y simulación.
 
 Cada incremento exige migración revisada, seed repetible, tests de reglas, typecheck y build antes de avanzar.
+
+## Límites implementados en etapa 1
+Los controladores están separados por dominio y comparten un guard global. El JWT determina `companyId`, sucursal, roles y permisos; ningún endpoint acepta el tenant desde el cliente. `UserRole` permite múltiples roles, mientras `RolePermission` mantiene permisos configurables. Las actualizaciones de costo/precio viven en una transacción que también escribe sus historiales.

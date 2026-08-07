@@ -5,3 +5,5 @@ coverage
 *.log
 .DS_Store
 apps/api/prisma/dev.db
+
+*.tsbuildinfo
