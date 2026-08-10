@@ -19,6 +19,7 @@ import type { Me } from '../lib/api';
 import { can } from '../lib/api';
 import { SyncIndicator } from './SyncIndicator';
 import type { Branch } from '../pages/Branches';
+import { appPath, currentRoute, navigate } from '../lib/navigation';
 const items = [
   ['/', 'Inicio', LayoutDashboard, 'dashboard.view'],
   ['/branches', 'Sucursales', Building2, 'branches.view'],
@@ -62,8 +63,8 @@ export function Layout({
           .map(([to, label, Icon]) => (
             <a
               key={to}
-              href={to}
-              className={`flex min-h-12 items-center gap-3 rounded-xl px-3 py-3 text-sm ${location.pathname === to ? 'bg-white/15 text-white' : 'text-emerald-100 hover:bg-white/10'}`}
+              href={appPath(to)}
+              className={`flex min-h-12 items-center gap-3 rounded-xl px-3 py-3 text-sm ${currentRoute() === to ? 'bg-white/15 text-white' : 'text-emerald-100 hover:bg-white/10'}`}
             >
               <Icon size={20} />
               {!collapsed && label}
@@ -74,7 +75,7 @@ export function Layout({
         className="mt-auto flex min-h-12 items-center gap-3 rounded-xl p-3 text-sm text-emerald-100 hover:bg-white/10"
         onClick={() => {
           sessionStorage.clear();
-          location.href = '/login';
+          navigate('/login');
         }}
       >
         <LogOut size={20} />

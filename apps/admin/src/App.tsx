@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Layout } from './components/Layout';
 import { PwaManager } from './components/PwaManager';
 import { api, type Me } from './lib/api';
+import { currentRoute } from './lib/navigation';
 import { connectivityService } from './offline/connectivity/connectivity.service';
 import { offlineDb } from './offline/db/database';
 import { deviceConfig, saveDeviceConfig } from './offline/db/device';
@@ -26,6 +27,7 @@ const pages: Record<string, React.ReactNode> = {
   '/settings': <Diagnostics />,
 };
 export default function App() {
+  const route = currentRoute();
   const [me, setMe] = useState<Me>(),
     [ready, setReady] = useState(false),
     [branches, setBranches] = useState<Branch[]>([]),
@@ -79,7 +81,7 @@ export default function App() {
   }, [me]);
   if (!ready)
     return <div className="grid min-h-screen place-items-center text-brand-700">Preparando este dispositivo…</div>;
-  if (!me || location.pathname === '/login')
+  if (!me || route === '/login')
     return (
       <>
         <Login offlineAvailable={Boolean(me)} />
@@ -87,10 +89,10 @@ export default function App() {
       </>
     );
   const page =
-    location.pathname === '/settings' && !me.permissions.includes('branches.update') ? (
+    route === '/settings' && !me.permissions.includes('branches.update') ? (
       <div className="card p-6">No tenés permiso para configurar este dispositivo.</div>
     ) : (
-      (pages[location.pathname] ?? pages['/'])
+      (pages[route] ?? pages['/'])
     );
   return (
     <>

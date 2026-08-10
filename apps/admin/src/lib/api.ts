@@ -1,4 +1,6 @@
-export const API = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
+import { navigate } from './navigation';
+
+export const API = (import.meta.env.VITE_API_URL || `${import.meta.env.BASE_URL}api`).replace(/\/$/, '');
 export type Me = {
   user: { id: string; username: string; firstName: string; lastName: string; roles: { code: string }[] };
   permissions: string[];
@@ -18,7 +20,7 @@ export async function api<T>(path: string, options: RequestInit = {}) {
   if (response.status === 401) {
     sessionStorage.removeItem('accessToken');
     sessionStorage.removeItem('refreshToken');
-    if (!path.includes('/auth/')) location.href = '/login';
+    if (!path.includes('/auth/')) navigate('/login');
   }
   const body = await response.json();
   if (!response.ok) throw new Error(body.error?.message ?? body.message ?? 'Error inesperado');

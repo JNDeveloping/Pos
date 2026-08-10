@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Boxes, CloudOff, LockKeyhole } from 'lucide-react';
 import { api } from '../lib/api';
+import { navigate } from '../lib/navigation';
 export function Login({ offlineAvailable = false }: { offlineAvailable?: boolean }) {
   const [error, setError] = useState(''),
     [loading, setLoading] = useState(false);
@@ -16,7 +17,7 @@ export function Login({ offlineAvailable = false }: { offlineAvailable?: boolean
       });
       sessionStorage.setItem('accessToken', r.accessToken);
       sessionStorage.setItem('refreshToken', r.refreshToken);
-      location.href = '/';
+      navigate('/');
     } catch (x) {
       setError(
         navigator.onLine ? (x as Error).message : 'Necesitás Internet para el primer ingreso en este dispositivo.',
@@ -52,7 +53,7 @@ export function Login({ offlineAvailable = false }: { offlineAvailable?: boolean
           <button
             className="btn-secondary mt-3 min-h-12 w-full"
             onClick={() => {
-              location.href = '/';
+              navigate('/');
             }}
           >
             <CloudOff size={18} />

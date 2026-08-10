@@ -1,0 +1,19 @@
+[Unit]
+Description=API POS de El Rincon de los Nietos
+After=network.target postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/rincon-pos
+EnvironmentFile=/opt/rincon-pos/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run start -w @rincon/api
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

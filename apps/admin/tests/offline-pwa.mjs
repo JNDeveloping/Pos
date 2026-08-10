@@ -5,11 +5,11 @@ const context = await browser.newContext({ serviceWorkers: 'allow', viewport: { 
 const page = await context.newPage();
 page.on('console', (m) => console.log('browser:', m.type(), m.text()));
 page.on('pageerror', (e) => console.log('pageerror', e.message));
-await page.goto('http://localhost:4173', { waitUntil: 'networkidle' });
+await page.goto('http://localhost:4173/pos/', { waitUntil: 'networkidle' });
 await page.getByLabel('Usuario o email').fill('admin');
 await page.getByLabel('Contraseña').fill('Cambiar123!');
 await page.getByRole('button', { name: 'Ingresar' }).click();
-await page.waitForURL('http://localhost:4173/');
+await page.waitForURL('http://localhost:4173/pos/');
 await page.getByText('Panel administrativo').waitFor();
 await page.evaluate(() => navigator.serviceWorker.ready);
 const pwa = await page.evaluate(async () => {
@@ -50,9 +50,9 @@ await page.screenshot({ path: '/tmp/rincon-pwa-mobile-online.png', fullPage: tru
 await context.setOffline(true);
 await page.reload({ waitUntil: 'domcontentloaded' });
 await page.getByText('Panel administrativo').waitFor();
-await page.goto('http://localhost:4173/products', { waitUntil: 'domcontentloaded' });
+await page.goto('http://localhost:4173/pos/products', { waitUntil: 'domcontentloaded' });
 console.log('offline-body', (await page.locator('body').innerText()).slice(0, 1000));
-await page.getByRole('heading', { name: 'Productos' }).waitFor();
+await page.getByRole('heading', { name: 'Productos de la sucursal' }).waitFor();
 await page.getByText('Gaseosa Cola 2,25 L').waitFor();
 const offlineCounts = await page.evaluate(async () => {
   const req = indexedDB.open('rincon-offline');
@@ -69,7 +69,7 @@ await page.screenshot({ path: '/tmp/rincon-pwa-mobile-offline.png', fullPage: tr
 await context.setOffline(false);
 await page.waitForFunction(async () => {
   try {
-    return (await fetch('http://localhost:3000/api/health')).ok;
+    return (await fetch('/pos/api/health')).ok;
   } catch {
     return false;
   }
