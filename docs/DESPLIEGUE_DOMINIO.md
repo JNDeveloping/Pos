@@ -96,3 +96,27 @@ Ejemplo:
     Include /var/www/grupolosnietos/pos/infra/apache/grupolosnietos-pos.conf
 </VirtualHost>
 ```
+
+### Error `Unexpected token '<'`
+
+Ese error no proviene de las credenciales. Significa que el navegador pidió `/pos/api/auth/login`, pero Apache
+respondió `index.html` (`<!doctype html>`) en lugar del JSON de NestJS. Sucede cuando falta `ProxyPass`, el snippet no
+está incluido en el VirtualHost HTTPS, `mod_proxy_http` no está habilitado o la API no está escuchando en 3002.
+
+Comprobar primero el backend directamente desde el VPS:
+
+```bash
+curl -i http://127.0.0.1:3002/api/health
+```
+
+Debe responder `Content-Type: application/json` y un cuerpo con `"status":"ok"`. Después comprobar el mismo recurso
+a través de Apache:
+
+```bash
+curl -i https://grupolosnietos.com.ar/pos/api/health
+```
+
+Si la segunda respuesta comienza con `<!doctype html>`, Apache está enviando la petición al fallback React. Revisar
+que las directivas `ProxyPass` del snippet estén dentro del VirtualHost `*:443`, ejecutar `apachectl configtest` y
+recargar Apache. El fallback incluye además una exclusión explícita para `/pos/api`, de modo que nunca debería
+convertir un error real de la API en HTML.
