@@ -22,7 +22,8 @@
     "predb:deploy": "npm run clean:legacy && npm run check:release",
     "db:deploy": "npm run db:deploy -w @rincon/api",
     "db:seed": "npm run db:seed -w @rincon/api",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "permissions:sync": "npm run permissions:sync -w @rincon/api"
   },
   "engines": {
     "node": ">=20.19"

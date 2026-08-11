@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Layout } from './components/Layout';
 import { PwaManager } from './components/PwaManager';
-import { api, type Me } from './lib/api';
+import { api, hasPermission, type Me } from './lib/api';
 import { currentRoute } from './lib/navigation';
 import { connectivityService } from './services/connectivity.service';
 import { branchContext } from './lib/branch-context';
@@ -23,6 +23,13 @@ import { Purchases } from './pages/Purchases';
 import { InvoiceImport } from './pages/InvoiceImport';
 import { SupplierDetail } from './pages/SupplierDetail';
 import { requestTabSession } from './lib/auth-session';
+import { Roles } from './pages/Roles';
+import { RoleDetail } from './pages/RoleDetail';
+import { PurchaseOrders } from './pages/PurchaseOrders';
+import { PurchaseOrderNew } from './pages/PurchaseOrderNew';
+import { PurchaseOrderDetail } from './pages/PurchaseOrderDetail';
+import { PurchaseDetail } from './pages/PurchaseDetail';
+import { PurchaseNew } from './pages/PurchaseNew';
 const pages: Record<string, React.ReactNode> = {
   '/': <Dashboard />,
   '/branches': <Branches />,
@@ -31,7 +38,7 @@ const pages: Record<string, React.ReactNode> = {
   '/users': <Users />,
   '/products': <Products />,
   '/catalog': <Products mode="master" />,
-  '/roles': <SimpleCrud title="Roles y permisos" path="/roles" readOnly />,
+  '/roles': <Roles />,
   '/settings': <Diagnostics />,
   '/admin/diagnostics': <Diagnostics />,
   '/prices': <Commerce kind="prices" />,
@@ -42,12 +49,34 @@ const pages: Record<string, React.ReactNode> = {
   '/suppliers': <Suppliers />,
   '/purchases': <Purchases />,
   '/purchases/invoices': <InvoiceImport />,
+  '/admin/suppliers': <Suppliers />,
+  '/admin/purchase-orders': <PurchaseOrders />,
+  '/admin/purchase-orders/new': <PurchaseOrderNew />,
+  '/admin/purchases': <Purchases />,
+  '/admin/purchases/new': <PurchaseNew />,
+  '/admin/invoices': <InvoiceImport />,
+  '/admin/invoices/analyze': <InvoiceImport />,
+  '/admin/roles': <Roles />,
   '/admin/products': <Products />,
   '/admin/catalog': <Products mode="master" />,
   '/admin/prices': <Commerce kind="prices" />,
   '/admin/costs': <Commerce kind="costs" />,
   '/admin/labels': <Labels />,
   '/admin/audit': <Audit />,
+};
+const routePermissions: Record<string, string> = {
+  '/suppliers': 'suppliers.view',
+  '/admin/suppliers': 'suppliers.view',
+  '/purchases': 'purchases.view',
+  '/admin/purchases': 'purchases.view',
+  '/admin/purchases/new': 'purchases.create',
+  '/purchases/invoices': 'invoices.view',
+  '/admin/invoices': 'invoices.view',
+  '/admin/invoices/analyze': 'invoices.analyze',
+  '/admin/purchase-orders': 'purchaseOrders.view',
+  '/admin/purchase-orders/new': 'purchaseOrders.create',
+  '/roles': 'roles.view',
+  '/admin/roles': 'roles.view',
 };
 export default function App() {
   const route = currentRoute();
@@ -104,12 +133,43 @@ export default function App() {
   const productMatch = route.match(/^\/(?:admin\/)?products\/([0-9a-f-]{36})$/i);
   const supplierMatch = route.match(/^\/(?:admin\/)?suppliers\/([0-9a-f-]{36})$/i);
   const branchMatch = route.match(/^\/(?:admin\/)?branches\/([0-9a-f-]{36})$/i);
+  const roleMatch = route.match(/^\/(?:admin\/)?roles\/([0-9a-f-]{36})$/i);
+  const orderMatch = route.match(/^\/admin\/purchase-orders\/([0-9a-f-]{36})$/i);
+  const purchaseMatch = route.match(/^\/admin\/purchases\/([0-9a-f-]{36})$/i);
+  const requiredPermission =
+    routePermissions[route] ??
+    (supplierMatch
+      ? 'suppliers.view'
+      : roleMatch
+        ? 'roles.view'
+        : orderMatch
+          ? 'purchaseOrders.view'
+          : purchaseMatch
+            ? 'purchases.view'
+            : undefined);
+  if (requiredPermission && !hasPermission(me, requiredPermission))
+    return (
+      <Layout me={me} branches={branches} currentBranchId={currentBranchId} onBranchChange={async () => {}}>
+        <div className="card p-8">
+          <h1 className="text-2xl font-bold">Acceso denegado</h1>
+          <p className="mt-2 text-slate-500">
+            No tiene el permiso <code>{requiredPermission}</code> para abrir esta sección.
+          </p>
+        </div>
+      </Layout>
+    );
   const page = productMatch ? (
     <ProductDetail id={productMatch[1]} />
   ) : supplierMatch ? (
     <SupplierDetail id={supplierMatch[1]} />
   ) : branchMatch ? (
     <BranchDetail id={branchMatch[1]} />
+  ) : roleMatch ? (
+    <RoleDetail id={roleMatch[1]} />
+  ) : orderMatch ? (
+    <PurchaseOrderDetail id={orderMatch[1]} />
+  ) : purchaseMatch ? (
+    <PurchaseDetail id={purchaseMatch[1]} />
   ) : route === '/settings' && !me.permissions.includes('branches.settings') ? (
     <div className="card p-6">No tenés permiso para configurar este dispositivo.</div>
   ) : (

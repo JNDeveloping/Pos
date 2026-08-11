@@ -200,6 +200,7 @@ model Role {
   name        String
   description String?
   active      Boolean          @default(true)
+  systemRole  Boolean          @default(false)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   permissions RolePermission[]
@@ -215,6 +216,9 @@ model Permission {
   company     Company          @relation(fields: [companyId], references: [id])
   code        String
   description String
+  module      String           @default("GENERAL")
+  label       String           @default("")
+  sortOrder   Int              @default(0)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   roles       RolePermission[]

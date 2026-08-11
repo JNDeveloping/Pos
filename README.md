@@ -94,6 +94,10 @@ El circuito de proveedores, órdenes, compras, recepción, documentos de factura
 matching asistido y actualización confirmada de costos se documenta en
 `docs/MENSAJE_4.md`. La IA nunca confirma una compra automáticamente.
 
+Después de agregar módulos o actualizar una instalación existente, ejecute
+`npm run permissions:sync`. El comando crea y actualiza el catálogo de permisos,
+protege el acceso total de `SUPER_ADMIN` y no elimina asignaciones personalizadas.
+
 ## Actualización de un despliegue existente
 
 Si los archivos se copian encima de una versión anterior, pueden quedar directorios que ya no pertenecen al proyecto (por ejemplo `apps/admin/src/offline` o `apps/api/src/modules/sync`). El build ejecuta una limpieza preventiva, pero en producción se recomienda:

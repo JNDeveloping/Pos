@@ -51,7 +51,10 @@ export class AuthService {
   async refresh(token: string) {
     try {
       const p = await this.jwt.verifyAsync<Session>(token, { secret: this.secret('JWT_REFRESH_SECRET') });
-      const u = await this.db.user.findUnique({ where: { id: p.sub } });
+      const u = await this.db.user.findUnique({
+        where: { id: p.sub },
+        include: { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } },
+      });
       if (
         !u?.active ||
         u.tokenVersion !== p.tokenVersion ||
@@ -59,7 +62,11 @@ export class AuthService {
         !(await verify(u.refreshTokenHash, token))
       )
         throw 0;
-      return this.tokens(p);
+      const roles = u.roles.filter(({ role }) => role.active).map(({ role }) => role.code);
+      const permissions = [
+        ...new Set(u.roles.flatMap(({ role }) => role.permissions.map(({ permission }) => permission.code))),
+      ];
+      return this.tokens({ ...p, roles, permissions, tokenVersion: u.tokenVersion });
     } catch {
       throw new UnauthorizedException('Refresh token inválido');
     }
@@ -79,12 +86,28 @@ export class AuthService {
         lastName: true,
         branch: true,
         company: true,
-        roles: { select: { role: { select: { id: true, code: true, name: true } } } },
+        roles: {
+          select: {
+            role: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                active: true,
+                permissions: { select: { permission: { select: { code: true } } } },
+              },
+            },
+          },
+        },
       },
     });
+    const roles = user.roles.filter(({ role }) => role.active).map(({ role }) => role);
+    const permissions = [
+      ...new Set(roles.flatMap((role) => role.permissions.map(({ permission }) => permission.code))),
+    ];
     return {
-      user: { ...user, roles: user.roles.map((r) => r.role) },
-      permissions: s.permissions,
+      user: { ...user, roles: roles.map(({ permissions: _permissions, ...role }) => role) },
+      permissions,
       branch: user.branch,
       company: user.company,
     };

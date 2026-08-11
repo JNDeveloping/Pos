@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FileUp, Plus } from 'lucide-react';
 import { api } from '../lib/api';
+import { appPath } from '../lib/navigation';
 type Purchase = {
   id: string;
   invoiceNumber?: string;
@@ -27,45 +28,56 @@ export function Purchases() {
           <p className="text-slate-500">Borrador → revisión → confirmación humana.</p>
         </div>
         <div className="flex gap-2">
-          <a className="btn-primary" href="purchases/invoices">
+          <a className="btn-primary" href={appPath('/admin/invoices/analyze')}>
             <FileUp size={18} /> Importar factura
           </a>
-          <button>
+          <a className="btn-secondary" href={appPath('/admin/purchases/new')}>
             <Plus size={18} /> Carga manual
-          </button>
+          </a>
         </div>
       </header>
       {error && <div className="rounded-xl bg-red-50 p-3 text-red-700">{error}</div>}
-      <div className="card overflow-x-auto">
-        <table className="w-full min-w-[760px]">
-          <thead>
-            <tr>
-              <th>Factura</th>
-              <th>Proveedor</th>
-              <th>Fecha</th>
-              <th>Sucursal</th>
-              <th>Items</th>
-              <th>Total</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((x) => (
-              <tr key={x.id}>
-                <td>{x.invoiceNumber || 'Sin número'}</td>
-                <td>{x.supplier.name}</td>
-                <td>{new Date(x.invoiceDate).toLocaleDateString()}</td>
-                <td>{x.branch.name}</td>
-                <td>{x._count.items}</td>
-                <td>${Number(x.total).toLocaleString('es-AR')}</td>
-                <td>
-                  <span className="badge">{x.status}</span>
-                </td>
+      {!data.length && !error ? (
+        <div className="card p-10 text-center">
+          <b>No hay compras registradas</b>
+          <p className="mt-1 text-sm text-slate-500">Cargue una factura o registre una compra manual.</p>
+        </div>
+      ) : (
+        <div className="card overflow-x-auto">
+          <table className="w-full min-w-[760px]">
+            <thead>
+              <tr>
+                <th>Factura</th>
+                <th>Proveedor</th>
+                <th>Fecha</th>
+                <th>Sucursal</th>
+                <th>Items</th>
+                <th>Total</th>
+                <th>Estado</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {data.map((x) => (
+                <tr
+                  key={x.id}
+                  className="cursor-pointer"
+                  onClick={() => (location.href = appPath(`/admin/purchases/${x.id}`))}
+                >
+                  <td>{x.invoiceNumber || 'Sin número'}</td>
+                  <td>{x.supplier.name}</td>
+                  <td>{new Date(x.invoiceDate).toLocaleDateString()}</td>
+                  <td>{x.branch.name}</td>
+                  <td>{x._count.items}</td>
+                  <td>${Number(x.total).toLocaleString('es-AR')}</td>
+                  <td>
+                    <span className="badge">{x.status}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

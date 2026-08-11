@@ -42,8 +42,16 @@ const groups: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = [
       ['/catalog', 'Catálogo maestro', LibraryBig, 'products.view'],
       ['/categories', 'Categorías', FolderTree, 'categories.view'],
       ['/brands', 'Marcas', Tags, 'brands.view'],
-      ['/suppliers', 'Proveedores', Truck, 'suppliers.view'],
-      ['/purchases', 'Compras', ShoppingCart, 'purchases.view'],
+    ],
+  },
+  {
+    label: 'COMPRAS',
+    items: [
+      ['/admin/suppliers', 'Proveedores', Truck, 'suppliers.view'],
+      ['/admin/purchase-orders', 'Órdenes de compra', FileText, 'purchaseOrders.view'],
+      ['/admin/purchases', 'Compras', ShoppingCart, 'purchases.view'],
+      ['/admin/invoices', 'Facturas', FileText, 'invoices.view'],
+      ['/admin/invoices/analyze', 'Analizar factura', Search, 'invoices.analyze'],
     ],
   },
   {

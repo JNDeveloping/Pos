@@ -1,56 +1,12 @@
 import { PrismaClient, UnitType } from '@prisma/client';
 import { hash } from 'argon2';
 const db = new PrismaClient();
-const permissionCodes = [
-  'dashboard.view',
-  'branches.view',
-  'branches.create',
-  'branches.update',
-  'branches.delete',
-  'users.view',
-  'users.create',
-  'users.update',
-  'users.delete',
-  'roles.view',
-  'roles.manage',
-  'products.view',
-  'products.create',
-  'products.update',
-  'products.disable',
-  'products.import',
-  'products.export',
-  'categories.view',
-  'categories.manage',
-  'brands.view',
-  'brands.manage',
-  'prices.view',
-  'prices.update',
-  'prices.bulkUpdate',
-  'costs.view',
-  'costs.update',
-  'costs.bulkUpdate',
-  'labels.view',
-  'labels.generate',
-  'audit.view',
-  'branches.settings',
-  'priceLists.view',
-  'priceLists.manage',
-  'stock.view',
-  'suppliers.view',
-  'suppliers.create',
-  'suppliers.update',
-  'suppliers.disable',
-  'purchases.view',
-  'purchases.create',
-  'purchases.update',
-  'purchases.confirm',
-  'purchases.cancel',
-  'purchaseOrders.view',
-  'purchaseOrders.manage',
-  'invoiceAI.use',
-  'invoiceAI.review',
-  'costs.applyFromPurchase',
-];
+import {
+  adminPermissionCodes,
+  managerPermissionCodes,
+  permissionDefinitions,
+} from '../src/permissions/permission-definitions';
+
 async function main() {
   const password = process.env.SEED_ADMIN_PASSWORD;
   if (!password || password.length < 10)
@@ -78,11 +34,16 @@ async function main() {
     data: { active: false, deletedAt: new Date() },
   });
   const permissions = await Promise.all(
-    permissionCodes.map((code) =>
+    permissionDefinitions.map((definition) =>
       db.permission.upsert({
-        where: { companyId_code: { companyId: company.id, code } },
-        update: {},
-        create: { companyId: company.id, code, description: code },
+        where: { companyId_code: { companyId: company.id, code: definition.code } },
+        update: {
+          module: definition.module,
+          label: definition.label,
+          description: definition.description,
+          sortOrder: definition.sortOrder,
+        },
+        create: { companyId: company.id, ...definition },
       }),
     ),
   );
@@ -92,7 +53,7 @@ async function main() {
       db.role.upsert({
         where: { companyId_code: { companyId: company.id, code } },
         update: {},
-        create: { companyId: company.id, code, name: code.replace('_', ' ') },
+        create: { companyId: company.id, code, name: code.replace('_', ' '), systemRole: true },
       }),
     ),
   );
@@ -100,6 +61,16 @@ async function main() {
     data: permissions.map((p) => ({ roleId: roles[0].id, permissionId: p.id })),
     skipDuplicates: true,
   });
+  const permissionByCode = new Map(permissions.map((permission) => [permission.code, permission.id]));
+  for (const [roleIndex, codes] of [
+    [1, adminPermissionCodes],
+    [2, managerPermissionCodes],
+  ] as const) {
+    await db.rolePermission.createMany({
+      data: codes.map((code) => ({ roleId: roles[roleIndex].id, permissionId: permissionByCode.get(code)! })),
+      skipDuplicates: true,
+    });
+  }
   const admin = await db.user.upsert({
     where: { companyId_username: { companyId: company.id, username: 'admin' } },
     update: { passwordHash: await hash(password) },
@@ -136,7 +107,9 @@ async function main() {
         .then((found) => found ?? db.category.create({ data: { companyId: company.id, name, sortOrder } })),
     ),
   );
-  const gaseosas = await db.category.findFirst({ where: { companyId: company.id, name: 'Gaseosas', parentId: categories[1].id } }) ?? await db.category.create({ data: { companyId: company.id, name: 'Gaseosas', parentId: categories[1].id } });
+  const gaseosas =
+    (await db.category.findFirst({ where: { companyId: company.id, name: 'Gaseosas', parentId: categories[1].id } })) ??
+    (await db.category.create({ data: { companyId: company.id, name: 'Gaseosas', parentId: categories[1].id } }));
   const brands = await Promise.all(
     ['La Serenísima', 'Coca-Cola', 'Marolio'].map((name) =>
       db.brand.upsert({
@@ -211,7 +184,13 @@ async function main() {
   await db.priceList.upsert({
     where: { companyId_code: { companyId: company.id, code: 'MINORISTA' } },
     update: { isDefault: true, active: true },
-    create: { companyId: company.id, code: 'MINORISTA', name: 'Minorista', description: 'Precio minorista predeterminado', isDefault: true },
+    create: {
+      companyId: company.id,
+      code: 'MINORISTA',
+      name: 'Minorista',
+      description: 'Precio minorista predeterminado',
+      isDefault: true,
+    },
   });
   console.log('Seed completado: admin / contraseña definida en SEED_ADMIN_PASSWORD');
 }

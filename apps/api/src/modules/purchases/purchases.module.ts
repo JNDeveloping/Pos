@@ -3,6 +3,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  ForbiddenException,
   Get,
   Injectable,
   Module,
@@ -196,7 +197,28 @@ class PurchasesService {
       take: 100,
     });
   }
+  async getOrder(s: Session, id: string) {
+    const order = await this.db.purchaseOrder.findFirst({
+      where: { id, companyId: s.companyId },
+      include: {
+        supplier: true,
+        branch: true,
+        items: { include: { product: true } },
+        purchases: { select: { id: true, invoiceNumber: true, status: true } },
+      },
+    });
+    if (!order) throw new NotFoundException('Orden no encontrada');
+    return order;
+  }
   async orderStatus(s: Session, id: string, status: PurchaseOrderStatus) {
+    const required =
+      status === PurchaseOrderStatus.SENT
+        ? 'purchaseOrders.send'
+        : status === PurchaseOrderStatus.CANCELLED
+          ? 'purchaseOrders.cancel'
+          : 'purchaseOrders.update';
+    if (!s.roles.includes('SUPER_ADMIN') && !s.permissions.includes(required))
+      throw new ForbiddenException(`Falta el permiso ${required}`);
     const old = await this.db.purchaseOrder.findFirst({ where: { id, companyId: s.companyId } });
     if (!old) throw new NotFoundException('Orden no encontrada');
     const row = await this.db.purchaseOrder.update({ where: { id }, data: { status } });
@@ -547,10 +569,13 @@ class OrdersController {
   @Get() @RequirePermissions('purchaseOrders.view') list(@CurrentSession() s: Session) {
     return this.svc.orders(s);
   }
-  @Post() @RequirePermissions('purchaseOrders.manage') create(@CurrentSession() s: Session, @Body() d: OrderDto) {
+  @Get(':id') @RequirePermissions('purchaseOrders.view') get(@CurrentSession() s: Session, @Param('id') id: string) {
+    return this.svc.getOrder(s, id);
+  }
+  @Post() @RequirePermissions('purchaseOrders.create') create(@CurrentSession() s: Session, @Body() d: OrderDto) {
     return this.svc.order(s, d);
   }
-  @Patch(':id/status') @RequirePermissions('purchaseOrders.manage') status(
+  @Patch(':id/status') @RequirePermissions('purchaseOrders.view') status(
     @CurrentSession() s: Session,
     @Param('id') id: string,
     @Body() d: StatusDto,
@@ -613,8 +638,46 @@ class InvoiceController {
     return this.svc.correct(s, id, Number(line), d);
   }
 }
+@Controller('invoices')
+class InvoicesAliasController {
+  constructor(private svc: InvoiceDocumentsService) {}
+  @Get() @RequirePermissions('invoices.view') list(@CurrentSession() s: Session) {
+    return this.svc.list(s);
+  }
+  @Post('upload')
+  @RequirePermissions('invoices.upload')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024, files: 1 } }))
+  upload(@CurrentSession() s: Session, @UploadedFile() f: UploadedInvoice, @Body('supplierId') supplierId?: string) {
+    return this.svc.upload(s, f, supplierId);
+  }
+}
+@Controller('invoice-analysis')
+class InvoiceAnalysisController {
+  constructor(private svc: InvoiceDocumentsService) {}
+  @Post(':id/analyze') @RequirePermissions('invoices.analyze') analyze(
+    @CurrentSession() s: Session,
+    @Param('id') id: string,
+    @Body() result?: InvoiceAnalysisResult,
+  ) {
+    return this.svc.analyze(s, id, result && Object.keys(result).length ? result : undefined);
+  }
+  @Patch(':id/items/:line') @RequirePermissions('invoices.review') correct(
+    @CurrentSession() s: Session,
+    @Param('id') id: string,
+    @Param('line') line: string,
+    @Body() d: CorrectionDto,
+  ) {
+    return this.svc.correct(s, id, Number(line), d);
+  }
+}
 @Module({
-  controllers: [OrdersController, PurchasesController, InvoiceController],
+  controllers: [
+    OrdersController,
+    PurchasesController,
+    InvoiceController,
+    InvoicesAliasController,
+    InvoiceAnalysisController,
+  ],
   providers: [PurchasesService, InvoiceDocumentsService, InvoiceAnalysisService, ManualInvoiceAnalyzer],
 })
 export class PurchasesModule {}

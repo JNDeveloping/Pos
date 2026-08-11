@@ -8,6 +8,11 @@ export type Me = {
   branch?: { name: string };
   company: { name: string };
 };
+export const hasRole = (me: Me | undefined, role: string) => me?.user.roles.some(({ code }) => code === role) ?? false;
+export const hasPermission = (me: Me | undefined, permission: string) =>
+  hasRole(me, 'SUPER_ADMIN') || (me?.permissions.includes(permission) ?? false);
+export const hasAnyPermission = (me: Me | undefined, permissions: string[]) =>
+  hasRole(me, 'SUPER_ADMIN') || permissions.some((permission) => me?.permissions.includes(permission));
 
 type ApiErrorBody = { error?: { message?: string }; message?: string };
 type Tokens = { accessToken: string; refreshToken: string };
@@ -84,4 +89,4 @@ async function performRefresh() {
   storeTokens(tokens);
   return tokens.accessToken;
 }
-export const can = (me: Me | undefined, p: string) => me?.permissions.includes(p) ?? false;
+export const can = hasPermission;

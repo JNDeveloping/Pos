@@ -84,3 +84,15 @@ describe('cliente API', () => {
     expect(refreshCalls).toBe(1);
   });
 });
+
+describe('helpers RBAC', () => {
+  it('SUPER_ADMIN conserva acceso a permisos nuevos', async () => {
+    const { hasPermission } = await import('./api');
+    const me = {
+      user: { id: '1', username: 'root', firstName: 'Super', lastName: 'Admin', roles: [{ code: 'SUPER_ADMIN' }] },
+      permissions: [],
+      company: { name: 'Test' },
+    };
+    expect(hasPermission(me, 'future.module.permission')).toBe(true);
+  });
+});

@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma.service';
 export type Session = {
   sub: string;
   companyId: string;
@@ -29,6 +30,7 @@ export class AuthGuard implements CanActivate {
   constructor(
     private jwt: JwtService,
     private reflector: Reflector,
+    private db: PrismaService,
   ) {}
   async canActivate(ctx: ExecutionContext) {
     if (this.reflector.getAllAndOverride<boolean>(IS_PUBLIC, [ctx.getHandler(), ctx.getClass()])) return true;
@@ -40,8 +42,26 @@ export class AuthGuard implements CanActivate {
     } catch {
       throw new UnauthorizedException('Token inválido o vencido');
     }
+    const user = await this.db.user.findFirst({
+      where: { id: req.session!.sub, companyId: req.session!.companyId, active: true, deletedAt: null },
+      select: {
+        tokenVersion: true,
+        roles: {
+          select: {
+            role: {
+              select: { code: true, active: true, permissions: { select: { permission: { select: { code: true } } } } },
+            },
+          },
+        },
+      },
+    });
+    if (!user || user.tokenVersion !== req.session!.tokenVersion) throw new UnauthorizedException('Sesión revocada');
+    req.session!.roles = user.roles.filter(({ role }) => role.active).map(({ role }) => role.code);
+    req.session!.permissions = [
+      ...new Set(user.roles.flatMap(({ role }) => role.permissions.map(({ permission }) => permission.code))),
+    ];
     const needed = this.reflector.getAllAndOverride<string[]>(PERMISSIONS, [ctx.getHandler(), ctx.getClass()]) ?? [];
-    if (!needed.every((p) => req.session!.permissions.includes(p)))
+    if (!req.session!.roles.includes('SUPER_ADMIN') && !needed.every((p) => req.session!.permissions.includes(p)))
       throw new ForbiddenException('No tiene permisos para esta operación');
     return true;
   }

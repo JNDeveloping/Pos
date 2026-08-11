@@ -15,7 +15,7 @@ export function InvoiceImport() {
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState('');
   const load = () =>
-    api<Doc[]>('/invoice-documents')
+    api<Doc[]>('/invoices')
       .then(setDocs)
       .catch((e) => setMessage(String(e)));
   useEffect(() => {
@@ -28,8 +28,8 @@ export function InvoiceImport() {
     try {
       const body = new FormData();
       body.append('file', file);
-      const doc = await api<Doc>('/invoice-documents/upload', { method: 'POST', body });
-      await api(`/invoice-documents/${doc.id}/analyze`, { method: 'POST', body: JSON.stringify({}) });
+      const doc = await api<Doc>('/invoices/upload', { method: 'POST', body });
+      await api(`/invoice-analysis/${doc.id}/analyze`, { method: 'POST', body: JSON.stringify({}) });
       setMessage('Archivo conservado y enviado a revisión. La confirmación humana sigue siendo obligatoria.');
       await load();
     } catch (e) {
