@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Building2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
+import { appPath } from '../lib/navigation';
 
 export type Branch = {
   id: string;
@@ -102,17 +103,13 @@ export function Branches() {
               {[branch.address, branch.city, branch.province].filter(Boolean).join(', ') || 'Sin dirección'}
             </p>
             <div className="mt-4 flex justify-end gap-2 border-t pt-3">
-              <button
+              <a
                 className="p-3"
                 title="Editar"
-                onClick={() => {
-                  const name = prompt('Nombre de la sucursal', branch.name);
-                  if (name)
-                    void api(`/branches/${branch.id}`, { method: 'PATCH', body: JSON.stringify({ name }) }).then(load);
-                }}
+                href={appPath(`/branches/${branch.id}`)}
               >
                 <Pencil size={18} />
-              </button>
+              </a>
               <button
                 className="p-3 text-red-600"
                 title="Desactivar"

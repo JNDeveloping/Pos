@@ -13,6 +13,20 @@
     @apply transition;
   }
 }
+@media print {
+  body { background: white !important; }
+  .no-print, aside, header { display: none !important; }
+  main { padding: 0 !important; }
+  .print-grid { display: grid !important; grid-template-columns: repeat(3, 1fr); gap: 4mm; }
+  .print-label { break-inside: avoid; border: 1px solid #111; padding: 5mm; text-align: center; min-height: 45mm; display: flex; flex-direction: column; justify-content: center; }
+  .print-label h2 { font-size: 16pt; font-weight: 700; }
+  .print-label .price { display: block; font-size: 26pt; margin: 3mm 0; }
+  .print-label .offer { color: #b91c1c; font-size: 18pt; }
+  .label-template-a5_offer, .label-template-a4_offer { grid-template-columns: 1fr; }
+  .label-template-a5_offer .print-label { min-height: 130mm; }
+  .label-template-a4_offer .print-label { min-height: 270mm; }
+}
+@media screen { .print-grid { display: none; } }
 @layer components {
   .card {
     @apply rounded-2xl border border-slate-200 bg-white shadow-sm;

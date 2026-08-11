@@ -13,6 +13,10 @@ import {
   ShieldCheck,
   Tags,
   Users,
+  DollarSign,
+  CircleDollarSign,
+  Printer,
+  ScrollText,
   X,
 } from 'lucide-react';
 import type { Me } from '../lib/api';
@@ -20,16 +24,22 @@ import { can } from '../lib/api';
 import { ConnectionStatus } from './ConnectionStatus';
 import type { Branch } from '../pages/Branches';
 import { appPath, currentRoute, navigate } from '../lib/navigation';
+import { clearTokens } from '../lib/auth-session';
 const items = [
   ['/', 'Inicio', LayoutDashboard, 'dashboard.view'],
   ['/branches', 'Sucursales', Building2, 'branches.view'],
   ['/users', 'Usuarios', Users, 'users.view'],
   ['/products', 'Productos', PackageSearch, 'products.view'],
   ['/catalog', 'Catálogo maestro', LibraryBig, 'products.view'],
+  ['/prices', 'Precios', DollarSign, 'prices.view'],
+  ['/costs', 'Costos', CircleDollarSign, 'costs.view'],
+  ['/price-lists', 'Listas de precios', Tags, 'priceLists.view'],
+  ['/labels', 'Etiquetas', Printer, 'labels.view'],
+  ['/audit', 'Auditoría', ScrollText, 'audit.view'],
   ['/categories', 'Categorías', FolderTree, 'categories.view'],
   ['/brands', 'Marcas', Tags, 'brands.view'],
   ['/roles', 'Roles y permisos', ShieldCheck, 'roles.view'],
-  ['/settings', 'Configuración', Settings, 'branches.update'],
+  ['/settings', 'Configuración', Settings, 'branches.settings'],
 ] as const;
 export function Layout({
   me,
@@ -74,7 +84,7 @@ export function Layout({
       <button
         className="mt-auto flex min-h-12 items-center gap-3 rounded-xl p-3 text-sm text-emerald-100 hover:bg-white/10"
         onClick={() => {
-          sessionStorage.clear();
+          clearTokens();
           navigate('/login');
         }}
       >

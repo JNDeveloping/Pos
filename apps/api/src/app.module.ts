@@ -14,6 +14,8 @@ import { ProductsModule } from './modules/products/products.module';
 import { CompanyModule } from './modules/company/company.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { HealthModule } from './modules/health/health.module';
+import { CommercialModule } from './modules/commercial/commercial.module';
+import { AuditModule } from './modules/audit/audit.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '../../.env' }),
@@ -29,6 +31,8 @@ import { HealthModule } from './modules/health/health.module';
     CategoriesModule,
     BrandsModule,
     ProductsModule,
+    CommercialModule,
+    AuditModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })

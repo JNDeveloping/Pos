@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import { Boxes, LockKeyhole } from 'lucide-react';
 import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
+import { storeTokens } from '../lib/auth-session';
 export function Login() {
   const [error, setError] = useState(''),
     [loading, setLoading] = useState(false);
@@ -15,8 +16,7 @@ export function Login() {
         method: 'POST',
         body: JSON.stringify({ identifier: f.get('identifier'), password: f.get('password') }),
       });
-      sessionStorage.setItem('accessToken', r.accessToken);
-      sessionStorage.setItem('refreshToken', r.refreshToken);
+      storeTokens(r);
       navigate('/');
     } catch (x) {
       setError(

@@ -12,6 +12,13 @@ import { Login } from './pages/Login';
 import { Products } from './pages/Products';
 import { SimpleCrud } from './pages/SimpleCrud';
 import { Users } from './pages/Users';
+import { Commerce } from './pages/Commerce';
+import { PriceLists } from './pages/PriceLists';
+import { Labels } from './pages/Labels';
+import { Audit } from './pages/Audit';
+import { ProductDetail } from './pages/ProductDetail';
+import { BranchDetail } from './pages/BranchDetail';
+import { requestTabSession } from './lib/auth-session';
 const pages: Record<string, React.ReactNode> = {
   '/': <Dashboard />,
   '/branches': <Branches />,
@@ -23,6 +30,17 @@ const pages: Record<string, React.ReactNode> = {
   '/roles': <SimpleCrud title="Roles y permisos" path="/roles" readOnly />,
   '/settings': <Diagnostics />,
   '/admin/diagnostics': <Diagnostics />,
+  '/prices': <Commerce kind="prices" />,
+  '/costs': <Commerce kind="costs" />,
+  '/price-lists': <PriceLists />,
+  '/labels': <Labels />,
+  '/audit': <Audit />,
+  '/admin/products': <Products />,
+  '/admin/catalog': <Products mode="master" />,
+  '/admin/prices': <Commerce kind="prices" />,
+  '/admin/costs': <Commerce kind="costs" />,
+  '/admin/labels': <Labels />,
+  '/admin/audit': <Audit />,
 };
 export default function App() {
   const route = currentRoute();
@@ -36,7 +54,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     async function restore() {
-      const token = sessionStorage.getItem('accessToken');
+      const token = sessionStorage.getItem('accessToken') ?? (await requestTabSession())?.accessToken;
       if (token) {
         try {
           const online = await api<Me>('/auth/me');
@@ -76,8 +94,10 @@ export default function App() {
         <PwaManager />
       </>
     );
-  const page =
-    route === '/settings' && !me.permissions.includes('branches.update') ? (
+  const productMatch = route.match(/^\/(?:admin\/)?products\/([0-9a-f-]{36})$/i);
+  const branchMatch = route.match(/^\/(?:admin\/)?branches\/([0-9a-f-]{36})$/i);
+  const page = productMatch ? <ProductDetail id={productMatch[1]} /> : branchMatch ? <BranchDetail id={branchMatch[1]} /> :
+    route === '/settings' && !me.permissions.includes('branches.settings') ? (
       <div className="card p-6">No tenés permiso para configurar este dispositivo.</div>
     ) : (
       (pages[route] ?? pages['/'])

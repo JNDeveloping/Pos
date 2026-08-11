@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
-type Item = { id: string; name: string; code?: string; active: boolean };
+type Item = { id: string; name: string; code?: string; active: boolean; parent?: {id:string;name:string}; parentId?:string; sortOrder?:number; _count?: {products?:number;subcategoryProducts?:number} };
 export function SimpleCrud({
   title,
   path,
@@ -15,10 +15,10 @@ export function SimpleCrud({
 }) {
   const [items, setItems] = useState<Item[]>([]),
     [name, setName] = useState(''),
-    [code, setCode] = useState('');
+    [code, setCode] = useState(''), [parentId,setParentId]=useState(''), [search,setSearch]=useState('');
   const load = async () => {
     try {
-      setItems(await api<Item[]>(path));
+      setItems(await api<Item[]>(`${path}?search=${encodeURIComponent(search)}`));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los datos');
     }
@@ -29,7 +29,7 @@ export function SimpleCrud({
   }, [path]);
   async function add(e: FormEvent) {
     e.preventDefault();
-    await api(path, { method: 'POST', body: JSON.stringify({ name, ...(withCode ? { code } : {}) }) });
+    await api(path, { method: 'POST', body: JSON.stringify({ name, ...(withCode ? { code } : {}), ...(path==='/categories'&&parentId?{parentId}:{}) }) });
     setName('');
     setCode('');
     load();
@@ -46,12 +46,14 @@ export function SimpleCrud({
         <form onSubmit={add} className="card mt-7 flex flex-wrap gap-3 p-4">
           <input placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} required />
           {withCode && <input placeholder="Código" value={code} onChange={(e) => setCode(e.target.value)} required />}
+          {path==='/categories'&&<select value={parentId} onChange={e=>setParentId(e.target.value)}><option value="">Categoría principal</option>{items.filter(x=>!x.parentId).map(x=><option value={x.id} key={x.id}>Subcategoría de {x.name}</option>)}</select>}
           <button className="btn">
             <Plus size={18} />
             Agregar
           </button>
         </form>
       )}
+      <form className="mt-4 flex gap-3" onSubmit={e=>{e.preventDefault();void load()}}><input className="flex-1" value={search} onChange={e=>setSearch(e.target.value)} placeholder={`Buscar ${title.toLowerCase()}…`}/><button className="btn-secondary">Buscar</button></form>
       {error && <p className="mt-4 rounded-xl bg-amber-50 p-4 text-amber-800">{error}</p>}
       <div className="card mt-5 overflow-x-auto">
         <table className="w-full text-left text-sm">
@@ -66,7 +68,7 @@ export function SimpleCrud({
           <tbody>
             {items.map((x) => (
               <tr className="border-b last:border-0" key={x.id}>
-                <td className="p-4 font-semibold">{x.name}</td>
+                <td className="p-4 font-semibold">{x.name}<small className="block font-normal text-slate-500">{x.parent?`Subcategoría de ${x.parent.name}`:`${x._count?.products??0} productos`}</small></td>
                 {withCode && <td>{x.code}</td>}
                 <td>
                   <span className="badge">{x.active ? 'Activo' : 'Inactivo'}</span>

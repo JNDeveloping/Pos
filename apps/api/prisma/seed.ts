@@ -16,13 +16,25 @@ const permissionCodes = [
   'products.view',
   'products.create',
   'products.update',
-  'products.delete',
+  'products.disable',
+  'products.import',
+  'products.export',
   'categories.view',
   'categories.manage',
   'brands.view',
   'brands.manage',
   'prices.view',
   'prices.update',
+  'prices.bulkUpdate',
+  'costs.view',
+  'costs.update',
+  'costs.bulkUpdate',
+  'labels.view',
+  'labels.generate',
+  'audit.view',
+  'branches.settings',
+  'priceLists.view',
+  'priceLists.manage',
   'stock.view',
 ];
 async function main() {
@@ -110,6 +122,7 @@ async function main() {
         .then((found) => found ?? db.category.create({ data: { companyId: company.id, name, sortOrder } })),
     ),
   );
+  const gaseosas = await db.category.findFirst({ where: { companyId: company.id, name: 'Gaseosas', parentId: categories[1].id } }) ?? await db.category.create({ data: { companyId: company.id, name: 'Gaseosas', parentId: categories[1].id } });
   const brands = await Promise.all(
     ['La Serenísima', 'Coca-Cola', 'Marolio'].map((name) =>
       db.brand.upsert({
@@ -122,13 +135,14 @@ async function main() {
   const demos = [
     {
       internalCode: 'BEB-001',
-      name: 'Gaseosa Cola 2,25 L',
+      name: 'Coca Cola 2.25L',
       categoryId: categories[1].id,
       brandId: brands[1].id,
       unitType: UnitType.UNIT,
       barcode: '7790000000010',
       cost: 1800,
       price: 3000,
+      subcategoryId: gaseosas.id,
     },
     {
       internalCode: 'LAC-001',
@@ -160,6 +174,7 @@ async function main() {
         internalCode: d.internalCode,
         name: d.name,
         categoryId: d.categoryId,
+        subcategoryId: 'subcategoryId' in d ? d.subcategoryId : undefined,
         brandId: d.brandId,
         unitType: d.unitType,
         barcodes: { create: { companyId: company.id, barcode: d.barcode, isPrimary: true } },
@@ -179,6 +194,11 @@ async function main() {
       skipDuplicates: true,
     });
   }
+  await db.priceList.upsert({
+    where: { companyId_code: { companyId: company.id, code: 'MINORISTA' } },
+    update: { isDefault: true, active: true },
+    create: { companyId: company.id, code: 'MINORISTA', name: 'Minorista', description: 'Precio minorista predeterminado', isDefault: true },
+  });
   console.log('Seed completado: admin / contraseña definida en SEED_ADMIN_PASSWORD');
 }
 main()

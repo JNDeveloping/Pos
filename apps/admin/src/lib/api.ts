@@ -1,4 +1,5 @@
 import { navigate } from './navigation';
+import { clearTokens, storeTokens } from './auth-session';
 
 export const API = (import.meta.env.VITE_API_URL || `${import.meta.env.BASE_URL}api`).replace(/\/$/, '');
 export type Me = {
@@ -75,14 +76,12 @@ async function performRefresh() {
   });
   const body = (await readApiBody(response)) as Tokens | ApiErrorBody;
   if (!response.ok) {
-    sessionStorage.removeItem('accessToken');
-    sessionStorage.removeItem('refreshToken');
+    clearTokens();
     navigate('/login');
     throw new Error((body as ApiErrorBody).error?.message ?? 'La sesión expiró');
   }
   const tokens = body as Tokens;
-  sessionStorage.setItem('accessToken', tokens.accessToken);
-  sessionStorage.setItem('refreshToken', tokens.refreshToken);
+  storeTokens(tokens);
   return tokens.accessToken;
 }
 export const can = (me: Me | undefined, p: string) => me?.permissions.includes(p) ?? false;

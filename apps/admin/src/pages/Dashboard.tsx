@@ -10,6 +10,10 @@ type S = {
   activeUsers: number;
   categories: number;
   productsWithoutPrice: number;
+  productsWithoutCost: number;
+  productsWithoutBarcode: number;
+  lowMargin: number;
+  pricesChangedToday: number;
   productsWithoutBranchConfig: number;
   enabledInBranch: number;
 };
@@ -34,6 +38,10 @@ export function Dashboard() {
     ['Usuarios activos', s?.activeUsers, Users],
     ['Categorías', s?.categories, FolderTree],
     ['Sin precio', s?.productsWithoutPrice, Tags],
+    ['Sin costo', s?.productsWithoutCost, Tags],
+    ['Sin barcode', s?.productsWithoutBarcode, Package],
+    ['Margen bajo', s?.lowMargin, Tags],
+    ['Precios modificados hoy', s?.pricesChangedToday, Tags],
   ];
   return (
     <>

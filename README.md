@@ -85,3 +85,7 @@ despliegue.
 ## PWA online
 
 La aplicación continúa siendo instalable y el Service Worker controla exclusivamente `/pos/`. Sólo precachea el shell y los assets versionados: nunca almacena respuestas de `/api/`. Durante esta fase PostgreSQL, mediante la API, es la única fuente de verdad. IndexedDB, la cola del navegador y los endpoints de sincronización fueron retirados. La continuidad offline futura se resolverá con un servidor PostgreSQL local por sucursal, según `docs/OFFLINE_FIRST.md`.
+
+## Catálogo comercial (Mensaje 3)
+
+Productos avanzados, barcodes tipados, subcategorías, configuración por sucursal, precios, costos, actualizaciones masivas con preview, lista MINORISTA, etiquetas imprimibles y auditoría están documentados en `docs/MENSAJE_3.md`. Aplicar `npm run db:deploy` antes de reiniciar la API.

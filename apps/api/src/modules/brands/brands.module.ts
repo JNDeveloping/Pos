@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Module, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Module, Param, Patch, Post, Query } from '@nestjs/common';
 import { IsBoolean, IsOptional, IsString, Length } from 'class-validator';
 import { CurrentSession, RequirePermissions, Session } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
@@ -9,8 +9,8 @@ class D {
 @Controller('brands')
 class C {
   constructor(private db: PrismaService) {}
-  @Get() @RequirePermissions('brands.view') list(@CurrentSession() s: Session) {
-    return this.db.brand.findMany({ where: { companyId: s.companyId, deletedAt: null }, orderBy: { name: 'asc' } });
+  @Get() @RequirePermissions('brands.view') list(@CurrentSession() s: Session, @Query('search') search?: string) {
+    return this.db.brand.findMany({ where: { companyId: s.companyId, deletedAt: null, ...(search ? { name: { contains: search, mode: 'insensitive' as const } } : {}) }, include: { _count: { select: { products: true } } }, orderBy: { name: 'asc' } });
   }
   @Post() @RequirePermissions('brands.manage') create(@CurrentSession() s: Session, @Body() d: D) {
     return this.db.brand.create({ data: { ...d, companyId: s.companyId } });

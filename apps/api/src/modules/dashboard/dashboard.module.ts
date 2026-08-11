@@ -8,8 +8,10 @@ class C {
     @CurrentSession() s: Session,
     @Query('branchId') branchId?: string,
   ) {
+    if (s.branchId && branchId && s.branchId !== branchId) branchId = s.branchId;
+    if (s.branchId) branchId = s.branchId;
     const where = { companyId: s.companyId, deletedAt: null };
-    const [products, activeProducts, branches, users, categories, withoutPrice, configured, enabledInBranch] =
+    const [products, activeProducts, branches, users, categories, withoutPrice, withoutCost, withoutBarcode, lowMargin, pricesChangedToday, configured, enabledInBranch] =
       await this.db.$transaction([
         this.db.product.count({ where }),
         this.db.product.count({ where: { ...where, active: true } }),
@@ -17,6 +19,10 @@ class C {
         this.db.user.count({ where: { ...where, active: true } }),
         this.db.category.count({ where: { ...where, active: true } }),
         this.db.product.count({ where: { ...where, branchConfigs: { some: { salePrice: 0 } } } }),
+        this.db.product.count({ where: { ...where, branchConfigs: { some: { cost: 0 } } } }),
+        this.db.product.count({ where: { ...where, barcodes: { none: {} } } }),
+        this.db.branchProduct.count({ where: { ...(branchId ? { branchId } : {}), enabled: true, margin: { lt: 10 }, branch: { companyId: s.companyId } } }),
+        this.db.priceHistory.count({ where: { branch: { companyId: s.companyId }, createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } } }),
         this.db.product.count({ where: { ...where, branchConfigs: { none: {} } } }),
         branchId
           ? this.db.branchProduct.count({
@@ -35,6 +41,10 @@ class C {
       activeUsers: users,
       categories,
       productsWithoutPrice: withoutPrice,
+      productsWithoutCost: withoutCost,
+      productsWithoutBarcode: withoutBarcode,
+      lowMargin,
+      pricesChangedToday,
       productsWithoutBranchConfig: configured,
       enabledInBranch,
     };

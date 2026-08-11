@@ -2,7 +2,8 @@ import { FormEvent, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileSpreadsheet, PackagePlus, Search, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { branchContext } from '../lib/branch-context';
-type Ref = { id: string; name: string };
+import { appPath } from '../lib/navigation';
+type Ref = { id: string; name: string; parentId?: string };
 type Config = {
   id: string;
   cost: string;
@@ -22,6 +23,9 @@ type Product = {
   branchConfigs: Config[];
   barcodes: { barcode: string }[];
   _count?: { branchConfigs: number };
+  presentationType?: string;
+  netContent?: string;
+  netContentUnit?: string;
 };
 type Page = { data: Product[]; meta: { page: number; pages: number; total: number } };
 export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
@@ -82,23 +86,25 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     const p = await api<{ id: string }>('/products', {
       method: 'POST',
       body: JSON.stringify({
-        internalCode: f.get('internalCode'),
+        internalCode: f.get('internalCode') || undefined,
         name: f.get('name'),
         categoryId: f.get('categoryId'),
+        subcategoryId: f.get('subcategoryId') || undefined,
         brandId: f.get('brandId') || undefined,
         unitType: f.get('unitType'),
         taxRate: f.get('taxRate'),
         shortName: f.get('shortName') || undefined,
         description: f.get('description') || undefined,
         sku: f.get('sku') || undefined,
-        supplierCode: f.get('supplierCode') || undefined,
-        presentation: f.get('presentation') || undefined,
+        supplierReference: f.get('supplierReference') || undefined,
+        presentationType: f.get('presentationType') || undefined,
         netContent: f.get('netContent') || undefined,
-        contentUnit: f.get('contentUnit') || undefined,
+        netContentUnit: f.get('netContentUnit') || undefined,
         unitsPerCase: f.get('unitsPerCase') ? Number(f.get('unitsPerCase')) : undefined,
         caseBarcode: f.get('caseBarcode') || undefined,
         isWeighted: f.get('isWeighted') === 'on',
-        allowManualPrice: f.get('allowManualPrice') === 'on',
+        allowManualPriceDefault: f.get('allowManualPriceDefault') === 'on',
+        notes: f.get('notes') || undefined,
       }),
     });
     for (const b of branches.filter((branch) => branch.id === branchId)) {
@@ -136,6 +142,18 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         codigo: String(row.Codigo ?? row.CODIGO ?? '').trim(),
         descripcion: String(row.Descripcion ?? row.DESCRIPCION ?? '').trim(),
         rubro: String(row.Rubro ?? row.RUBRO ?? 'SIN CLASIFICAR').trim(),
+        marca: String(row.Marca ?? row.MARCA ?? '').trim() || undefined,
+        subcategoria: String(row.Subcategoria ?? row.SUBCATEGORIA ?? '').trim() || undefined,
+        costo: row.Costo === undefined ? undefined : String(row.Costo),
+        precio: row.Precio === undefined ? undefined : String(row.Precio),
+        presentacion: row.Presentacion ? ({BOTELLA:'BOTTLE',LATA:'CAN',PAQUETE:'PACKAGE',CAJA:'BOX',BOLSA:'BAG',FRASCO:'JAR',UNIDAD:'UNIT',BULTO:'CASE'}[String(row.Presentacion).toUpperCase()] ?? String(row.Presentacion).toUpperCase()) : undefined,
+        contenido: row.Contenido === undefined ? undefined : String(row.Contenido),
+        unidad: row.Unidad ? String(row.Unidad).toUpperCase() : undefined,
+        unidadesPorBulto: row['Unidades por bulto'] ? Number(row['Unidades por bulto']) : undefined,
+        barcodeBulto: row['Barcode bulto'] ? String(row['Barcode bulto']) : undefined,
+        iva: row.IVA === undefined ? undefined : String(row.IVA),
+        sku: row.SKU ? String(row.SKU) : undefined,
+        ubicacion: row.Ubicacion ? String(row.Ubicacion) : undefined,
       }))
       .filter((row) => row.codigo && row.descripcion);
     if (!normalized.length) throw new Error('No se detectaron las columnas Codigo y Descripcion');
@@ -182,6 +200,15 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     );
     await load();
   }
+  async function exportCsv() {
+    const rows = await api<Array<Record<string, unknown>>>(`/products/export/data${branchId ? `?branchId=${branchId}` : ''}`);
+    const header = ['Código','Barcode','Producto','Categoría','Subcategoría','Marca','Presentación','Contenido','IVA','Costo','Precio','Margen'];
+    const csv = [header.join(','), ...rows.map((row) => {
+      const category=row.category as {name?:string}, subcategory=row.subcategory as {name?:string}|null, brand=row.brand as {name?:string}|null, barcodes=row.barcodes as {barcode:string}[], configs=row.branchConfigs as {cost?:string;salePrice:string;margin:string}[];
+      return [row.internalCode,barcodes[0]?.barcode,row.name,category?.name,subcategory?.name,brand?.name,row.presentationType,`${row.netContent??''} ${row.netContentUnit??''}`,row.taxRate,configs[0]?.cost,configs[0]?.salePrice,configs[0]?.margin].map(x=>`"${String(x??'').replaceAll('"','""')}"`).join(',');
+    })].join('\n');
+    const url=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'})); const link=document.createElement('a');link.href=url;link.download='productos.csv';link.click();URL.revokeObjectURL(url);
+  }
   return (
     <>
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -194,6 +221,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button className="btn-secondary" onClick={()=>void exportCsv()}><FileSpreadsheet size={18}/>Exportar CSV</button>
           <label className="btn-secondary cursor-pointer">
             <FileSpreadsheet size={18} /> Importar Excel
             <input
@@ -302,14 +330,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                   </td>
                   <td className="p-4">
                     <div className="flex gap-2">
-                      <button
-                        className="text-brand-600"
-                        onClick={() =>
-                          alert(p.branchConfigs.map((x) => `${x.branch.name}: $${x.salePrice}`).join('\n'))
-                        }
-                      >
-                        Ver
-                      </button>
+                      <a className="text-brand-600" href={appPath(`/products/${p.id}`)}>Ver ficha</a>
                       {branchId &&
                         !p.branchConfigs.some((config) => config.branch.id === branchId && config.enabled) && (
                           <button
@@ -324,16 +345,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                             Agregar a sucursal
                           </button>
                         )}
-                      <button
-                        className="text-brand-600"
-                        onClick={() => {
-                          const name = prompt('Nombre del producto', p.name);
-                          if (name)
-                            api(`/products/${p.id}`, { method: 'PATCH', body: JSON.stringify({ name }) }).then(load);
-                        }}
-                      >
-                        Editar
-                      </button>
+                      <a className="text-brand-600" href={appPath(`/products/${p.id}`)}>Editar</a>
                       {p.active && (
                         <button
                           className="text-red-600"
@@ -387,7 +399,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
             </div>
             <h3 className="mt-7 font-bold">Datos generales</h3>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <input name="internalCode" placeholder="Código interno" required />
+              <input name="internalCode" placeholder="Código interno (automático si se deja vacío)" />
               <input name="name" placeholder="Nombre" required />
               <input name="shortName" placeholder="Nombre corto" />
               <textarea name="description" placeholder="Descripción" className="md:col-span-2" />
@@ -397,6 +409,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                   <option value={x.id}>{x.name}</option>
                 ))}
               </select>
+              <select name="subcategoryId"><option value="">Sin subcategoría</option>{categories.filter(x=>x.parentId).map(x=><option value={x.id} key={x.id}>{x.name}</option>)}</select>
               <select name="brandId">
                 <option value="">Sin marca</option>
                 {brands.map((x) => (
@@ -416,25 +429,26 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
             <h3 className="mt-8 font-bold">Identificación y presentación</h3>
             <div className="mt-3 grid gap-3 md:grid-cols-3">
               <input name="sku" placeholder="SKU opcional" />
-              <input name="supplierCode" placeholder="Código de proveedor" />
-              <select name="presentation">
+              <input name="supplierReference" placeholder="Referencia externa / proveedor" />
+              <select name="presentationType">
                 <option value="">Presentación</option>
-                {['BOTELLA', 'LATA', 'PAQUETE', 'CAJA', 'BOLSA', 'FRASCO', 'SACHET', 'UNIDAD', 'PACK', 'OTRO'].map(
+                {['UNIT','BOTTLE','CAN','PACKAGE','BOX','BAG','JAR','SACHET','PACK','TRAY','DISPLAY','CASE','OTHER'].map(
                   (x) => (
                     <option key={x}>{x}</option>
                   ),
                 )}
               </select>
               <input name="netContent" type="number" min="0" step="0.001" placeholder="Contenido neto" />
-              <input name="contentUnit" placeholder="Unidad contenido (LITRO, KG…)" />
+              <select name="netContentUnit"><option value="">Unidad contenido</option>{['ML','L','G','KG','UN','M','CM','OTHER'].map(x=><option key={x}>{x}</option>)}</select>
               <input name="unitsPerCase" type="number" min="1" placeholder="Unidades por bulto" />
               <input name="caseBarcode" placeholder="Código de bulto" />
               <label className="flex items-center gap-2">
                 <input name="isWeighted" type="checkbox" /> Producto pesable
               </label>
               <label className="flex items-center gap-2">
-                <input name="allowManualPrice" type="checkbox" /> Permitir precio manual
+                <input name="allowManualPriceDefault" type="checkbox" /> Permitir precio manual
               </label>
+              <textarea className="rounded-xl border p-3 md:col-span-3" name="notes" placeholder="Notas del producto" />
             </div>
             <h3 className="mt-8 font-bold">Configuración por sucursal</h3>
             <div className="mt-3 grid gap-3">
