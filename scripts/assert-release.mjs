@@ -20,6 +20,7 @@ const migrations = (await readdir(resolve(root, 'apps/api/prisma/migrations'), {
 const requiredMigration = '20260812120000_message3_commercial_catalog';
 const purchasesMigration = '20260813120000_message4_purchases';
 const rolesMigration = '20260814120000_role_permission_metadata';
+const permissionActiveMigration = '20260815120000_permission_active';
 if (!migrations.includes(requiredMigration)) {
   throw new Error(
     `Checkout incompleto: falta la migración ${requiredMigration}. Actualice el código antes de desplegar.`,
@@ -32,5 +33,10 @@ if (!migrations.includes(purchasesMigration)) {
 }
 if (!migrations.includes(rolesMigration)) {
   throw new Error(`La copia está incompleta: falta ${rolesMigration}. Actualice el repositorio antes de desplegar.`);
+}
+if (!migrations.includes(permissionActiveMigration)) {
+  throw new Error(
+    `La copia está incompleta: falta ${permissionActiveMigration}. Actualice el repositorio antes de desplegar.`,
+  );
 }
 console.log(`Release verificada: ${migrations.length} migraciones y sin fuentes offline obsoletas.`);

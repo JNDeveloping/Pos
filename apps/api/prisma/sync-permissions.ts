@@ -1,48 +1,53 @@
 import { PrismaClient } from '@prisma/client';
-import {
-  adminPermissionCodes,
-  managerPermissionCodes,
-  permissionDefinitions,
-} from '../src/permissions/permission-definitions';
+import { SYSTEM_PERMISSIONS } from '../src/permissions/permission-definitions';
+import { planPermissionSync } from '../src/permissions/permission-sync';
 const db = new PrismaClient();
-async function main() {
-  const companies = await db.company.findMany({ select: { id: true } });
-  for (const company of companies) {
-    const permissions = await Promise.all(
-      permissionDefinitions.map((definition) =>
-        db.permission.upsert({
+type Summary = { created: number; updated: number; unchanged: number; undefinedCodes: string[] };
+export async function syncPermissions(client: PrismaClient = db): Promise<Summary> {
+  const summary: Summary = { created: 0, updated: 0, unchanged: 0, undefinedCodes: [] };
+  await client.$transaction(async (tx) => {
+    const companies = await tx.company.findMany({ select: { id: true, name: true } });
+    for (const company of companies) {
+      const existing = await tx.permission.findMany({
+        where: { companyId: company.id },
+        select: { id: true, code: true, module: true, label: true, description: true, sortOrder: true, active: true },
+      });
+      const plan = planPermissionSync(existing, SYSTEM_PERMISSIONS);
+      summary.created += plan.created.length;
+      summary.updated += plan.updated.length;
+      summary.unchanged += plan.unchanged.length;
+      for (const definition of SYSTEM_PERMISSIONS) {
+        await tx.permission.upsert({
           where: { companyId_code: { companyId: company.id, code: definition.code } },
+          create: { companyId: company.id, ...definition },
           update: {
             module: definition.module,
             label: definition.label,
             description: definition.description,
             sortOrder: definition.sortOrder,
+            active: definition.active,
           },
-          create: { companyId: company.id, ...definition },
-        }),
-      ),
-    );
-    const byCode = new Map(permissions.map((p) => [p.code, p.id]));
-    const roles = await db.role.findMany({
-      where: { companyId: company.id, code: { in: ['SUPER_ADMIN', 'ADMIN', 'ENCARGADO', 'CAJERO', 'REPOSITOR'] } },
-    });
-    for (const role of roles) {
-      await db.role.update({ where: { id: role.id }, data: { systemRole: true } });
-      const codes =
-        role.code === 'SUPER_ADMIN'
-          ? permissionDefinitions.map((p) => p.code)
-          : role.code === 'ADMIN'
-            ? adminPermissionCodes
-            : role.code === 'ENCARGADO'
-              ? managerPermissionCodes
-              : [];
-      if (codes.length)
-        await db.rolePermission.createMany({
-          data: codes.map((code) => ({ roleId: role.id, permissionId: byCode.get(code)! })),
-          skipDuplicates: true,
         });
+      }
+      for (const code of plan.undefinedCodes) summary.undefinedCodes.push(`${company.name}: ${code}`);
     }
-  }
-  console.log(`Permisos sincronizados para ${companies.length} empresa(s), sin eliminar asignaciones.`);
+  });
+  return summary;
 }
-main().finally(() => db.$disconnect());
+async function main() {
+  console.log('Sincronizando permisos...\n');
+  const result = await syncPermissions();
+  console.log(`Creados: ${result.created}`);
+  console.log(`Actualizados: ${result.updated}`);
+  console.log(`Sin cambios: ${result.unchanged}`);
+  console.log(`\nPermisos no definidos actualmente: ${result.undefinedCodes.length}`);
+  for (const code of result.undefinedCodes)
+    console.warn(`ADVERTENCIA: Permiso existente no definido actualmente: ${code}`);
+  console.log('\nSincronización finalizada. No se eliminaron permisos, roles ni relaciones RolePermission.');
+}
+void main()
+  .catch((error) => {
+    console.error('La sincronización falló; la transacción fue revertida.', error);
+    process.exitCode = 1;
+  })
+  .finally(() => db.$disconnect());

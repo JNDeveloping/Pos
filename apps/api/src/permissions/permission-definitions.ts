@@ -4,6 +4,7 @@ export type PermissionDefinition = {
   label: string;
   description: string;
   sortOrder: number;
+  active: boolean;
 };
 const modules: Record<string, string[]> = {
   DASHBOARD: ['dashboard.view|Ver panel'],
@@ -82,14 +83,16 @@ const modules: Record<string, string[]> = {
     'stock.adjust|Ajustar stock',
   ],
 };
-export const permissionDefinitions: PermissionDefinition[] = Object.entries(modules).flatMap(
+export const SYSTEM_PERMISSIONS: PermissionDefinition[] = Object.entries(modules).flatMap(
   ([module, items], moduleIndex) =>
     items.map((entry, itemIndex) => {
       const [code, label] = entry.split('|');
-      return { code, module, label, description: label, sortOrder: moduleIndex * 100 + itemIndex };
+      return { code, module, label, description: label, sortOrder: moduleIndex * 100 + itemIndex, active: true };
     }),
 );
-export const permissionCodes = permissionDefinitions.map((x) => x.code);
+/** @deprecated Use SYSTEM_PERMISSIONS. Kept as a compatibility alias. */
+export const permissionDefinitions = SYSTEM_PERMISSIONS;
+export const permissionCodes = SYSTEM_PERMISSIONS.map((x) => x.code);
 export const adminPermissionCodes = permissionCodes.filter(
   (code) => !['roles.manage', 'users.delete', 'branches.delete', 'stock.adjust'].includes(code),
 );

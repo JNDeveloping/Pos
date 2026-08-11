@@ -28,6 +28,17 @@ class UpdateRoleDto {
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsBoolean() active?: boolean;
 }
+@Controller('permissions')
+class PermissionsController {
+  constructor(private db: PrismaService) {}
+  @Get() @RequirePermissions('roles.view') list(@CurrentSession() s: Session) {
+    return this.db.permission.findMany({
+      where: { companyId: s.companyId },
+      select: { id: true, code: true, module: true, label: true, description: true, sortOrder: true, active: true },
+      orderBy: [{ module: 'asc' }, { sortOrder: 'asc' }, { label: 'asc' }],
+    });
+  }
+}
 @Controller('roles')
 class RolesController {
   constructor(private db: PrismaService) {}
@@ -41,7 +52,7 @@ class RolesController {
   @Get('permissions') @RequirePermissions('roles.view') permissions(@CurrentSession() s: Session) {
     return this.db.permission.findMany({
       where: { companyId: s.companyId },
-      orderBy: [{ module: 'asc' }, { sortOrder: 'asc' }, { code: 'asc' }],
+      orderBy: [{ module: 'asc' }, { sortOrder: 'asc' }, { label: 'asc' }],
     });
   }
   @Get(':id') @RequirePermissions('roles.view') async get(@CurrentSession() s: Session, @Param('id') id: string) {
@@ -144,5 +155,5 @@ class RolesController {
     return JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
   }
 }
-@Module({ controllers: [RolesController] })
+@Module({ controllers: [RolesController, PermissionsController] })
 export class RolesModule {}

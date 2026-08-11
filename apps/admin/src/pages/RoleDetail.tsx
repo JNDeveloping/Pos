@@ -28,7 +28,7 @@ export function RoleDetail({ id }: { id: string }) {
     [message, setMessage] = useState(''),
     [saving, setSaving] = useState(false);
   useEffect(() => {
-    Promise.all([api<Detail>(`/roles/${id}`), api<Permission[]>('/roles/permissions')])
+    Promise.all([api<Detail>(`/roles/${id}`), api<Permission[]>('/permissions')])
       .then(([r, p]) => {
         setRole(r);
         setPermissions(p);
