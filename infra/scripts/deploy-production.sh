@@ -8,7 +8,9 @@ echo "==> Verificando Node.js"
 node -e 'const [major,minor]=process.versions.node.split(".").map(Number); if(major<20 || (major===20 && minor<19)) throw new Error("Se requiere Node.js >= 20.19")'
 
 echo "==> Instalando exactamente package-lock.json"
-npm ci
+# Compilation, Prisma generation and tests use workspace development tools.
+# --include=dev also overrides a server-wide NODE_ENV=production/npm omit setting.
+npm ci --include=dev
 
 echo "==> Eliminando fuentes offline obsoletas de despliegues superpuestos"
 npm run clean:legacy

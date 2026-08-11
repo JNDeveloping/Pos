@@ -4,16 +4,16 @@
   "version": "0.1.0",
   "scripts": {
     "predev": "node ../../scripts/clean-legacy-offline.mjs && node ../../scripts/assert-release.mjs",
-    "dev": "dotenv -e ../../.env -- nest start --watch",
+    "dev": "node --env-file=../../.env ../../node_modules/@nestjs/cli/bin/nest.js start --watch",
     "prebuild": "node ../../scripts/clean-legacy-offline.mjs && node ../../scripts/assert-release.mjs",
-    "build": "dotenv -e ../../.env -- nest build",
-    "start": "dotenv -e ../../.env -- node dist/src/main.js",
+    "build": "node --env-file=../../.env ../../node_modules/@nestjs/cli/bin/nest.js build",
+    "start": "node --env-file=../../.env dist/src/main.js",
     "lint": "eslint \"{src,prisma}/**/*.ts\"",
     "test": "jest --runInBand --passWithNoTests",
-    "prisma:generate": "dotenv -e ../../.env -- prisma generate",
-    "db:migrate": "dotenv -e ../../.env -- prisma migrate dev",
-    "db:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
-    "db:seed": "dotenv -e ../../.env -- tsx prisma/seed.ts"
+    "prisma:generate": "node --env-file=../../.env ../../node_modules/prisma/build/index.js generate",
+    "db:migrate": "node --env-file=../../.env ../../node_modules/prisma/build/index.js migrate dev",
+    "db:deploy": "node --env-file=../../.env ../../node_modules/prisma/build/index.js migrate deploy",
+    "db:seed": "node --env-file=../../.env --import tsx prisma/seed.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.6",
@@ -36,7 +36,6 @@
     "@nestjs/cli": "^11.0.10",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.3.0",
-    "dotenv-cli": "^8.0.0",
     "eslint": "^9.34.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^16.3.0",

@@ -101,4 +101,8 @@ sudo systemctl restart rincon-pos-api
 sudo systemctl status rincon-pos-api --no-pager
 ```
 
+El script instala explícitamente las herramientas de compilación con
+`npm ci --include=dev`. Los comandos de la API cargan `.env` mediante Node.js,
+sin depender del ejecutable externo `dotenv-cli`.
+
 El script exige Node.js 20.19 o superior, usa `npm ci`, elimina únicamente las fuentes offline retiradas, verifica que exista la migración del Mensaje 3, aplica Prisma y recién entonces compila. El archivo `.env` no se elimina.
