@@ -1,24 +1,29 @@
 import { useState } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import {
+  Bell,
   Boxes,
   Building2,
-  ChevronLeft,
+  ChevronRight,
+  CircleDollarSign,
+  DollarSign,
+  FileText,
   FolderTree,
   LayoutDashboard,
+  LibraryBig,
   LogOut,
   Menu,
   PackageSearch,
-  LibraryBig,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Printer,
+  Search,
   Settings,
   ShieldCheck,
-  Tags,
-  Users,
-  DollarSign,
-  CircleDollarSign,
-  Printer,
-  ScrollText,
-  Truck,
   ShoppingCart,
+  Tags,
+  Truck,
+  Users,
   X,
 } from 'lucide-react';
 import type { Me } from '../lib/api';
@@ -27,24 +32,40 @@ import { ConnectionStatus } from './ConnectionStatus';
 import type { Branch } from '../pages/Branches';
 import { appPath, currentRoute, navigate } from '../lib/navigation';
 import { clearTokens } from '../lib/auth-session';
-const items = [
-  ['/', 'Inicio', LayoutDashboard, 'dashboard.view'],
-  ['/branches', 'Sucursales', Building2, 'branches.view'],
-  ['/users', 'Usuarios', Users, 'users.view'],
-  ['/products', 'Productos', PackageSearch, 'products.view'],
-  ['/catalog', 'Catálogo maestro', LibraryBig, 'products.view'],
-  ['/prices', 'Precios', DollarSign, 'prices.view'],
-  ['/costs', 'Costos', CircleDollarSign, 'costs.view'],
-  ['/price-lists', 'Listas de precios', Tags, 'priceLists.view'],
-  ['/labels', 'Etiquetas', Printer, 'labels.view'],
-  ['/audit', 'Auditoría', ScrollText, 'audit.view'],
-  ['/suppliers', 'Proveedores', Truck, 'suppliers.view'],
-  ['/purchases', 'Compras', ShoppingCart, 'purchases.view'],
-  ['/categories', 'Categorías', FolderTree, 'categories.view'],
-  ['/brands', 'Marcas', Tags, 'brands.view'],
-  ['/roles', 'Roles y permisos', ShieldCheck, 'roles.view'],
-  ['/settings', 'Configuración', Settings, 'branches.settings'],
-] as const;
+type NavItem = readonly [string, string, LucideIcon, string];
+const groups: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = [
+  { label: 'GENERAL', items: [['/', 'Inicio', LayoutDashboard, 'dashboard.view']] },
+  {
+    label: 'GESTIÓN',
+    items: [
+      ['/products', 'Productos', PackageSearch, 'products.view'],
+      ['/catalog', 'Catálogo maestro', LibraryBig, 'products.view'],
+      ['/categories', 'Categorías', FolderTree, 'categories.view'],
+      ['/brands', 'Marcas', Tags, 'brands.view'],
+      ['/suppliers', 'Proveedores', Truck, 'suppliers.view'],
+      ['/purchases', 'Compras', ShoppingCart, 'purchases.view'],
+    ],
+  },
+  {
+    label: 'COMERCIAL',
+    items: [
+      ['/prices', 'Precios', DollarSign, 'prices.view'],
+      ['/costs', 'Costos', CircleDollarSign, 'costs.view'],
+      ['/price-lists', 'Listas de precios', Tags, 'priceLists.view'],
+      ['/labels', 'Etiquetas', Printer, 'labels.view'],
+    ],
+  },
+  {
+    label: 'ADMINISTRACIÓN',
+    items: [
+      ['/branches', 'Sucursales', Building2, 'branches.view'],
+      ['/users', 'Usuarios', Users, 'users.view'],
+      ['/roles', 'Roles y permisos', ShieldCheck, 'roles.view'],
+      ['/audit', 'Auditoría', FileText, 'audit.view'],
+      ['/settings', 'Configuración', Settings, 'branches.settings'],
+    ],
+  },
+];
 export function Layout({
   me,
   branches,
@@ -59,95 +80,147 @@ export function Layout({
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false),
-    [drawer, setDrawer] = useState(false);
+    [drawer, setDrawer] = useState(false),
+    [profile, setProfile] = useState(false);
+  const route = currentRoute();
   const sidebar = (
     <>
-      <div className="mb-6 flex items-center gap-3 px-2 py-3">
-        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-500">
-          <Boxes />
+      <div className="sidebar-brand">
+        <span className="brand-mark">
+          <Boxes size={22} />
         </span>
-        {!collapsed && <b>{me.company.name}</b>}
-        <button className="ml-auto lg:hidden" onClick={() => setDrawer(false)} aria-label="Cerrar menú">
-          <X />
+        {!collapsed && (
+          <span className="min-w-0">
+            <b className="block truncate">{me.company.name}</b>
+            <small>Administración ERP</small>
+          </span>
+        )}
+        <button
+          className="ml-auto rounded-lg p-2 hover:bg-white/10 lg:hidden"
+          onClick={() => setDrawer(false)}
+          aria-label="Cerrar menú"
+        >
+          <X size={20} />
         </button>
       </div>
-      <nav className="space-y-1">
-        {items
-          .filter((i) => can(me, i[3]))
-          .map(([to, label, Icon]) => (
-            <a
-              key={to}
-              href={appPath(to)}
-              className={`flex min-h-12 items-center gap-3 rounded-xl px-3 py-3 text-sm ${currentRoute() === to ? 'bg-white/15 text-white' : 'text-emerald-100 hover:bg-white/10'}`}
-            >
-              <Icon size={20} />
-              {!collapsed && label}
-            </a>
-          ))}
+      <nav className="sidebar-nav">
+        {groups.map((group) => {
+          const visible = group.items.filter((i) => can(me, i[3]));
+          return visible.length ? (
+            <div key={group.label} className="nav-group">
+              {!collapsed && <p className="nav-label">{group.label}</p>}
+              {visible.map(([to, label, Icon]) => (
+                <a
+                  key={to}
+                  href={appPath(to)}
+                  title={collapsed ? label : undefined}
+                  className={`nav-item ${route === to ? 'nav-item-active' : ''}`}
+                >
+                  <Icon size={18} />
+                  {!collapsed && <span>{label}</span>}
+                  {!collapsed && route === to && <ChevronRight className="ml-auto" size={15} />}
+                </a>
+              ))}
+            </div>
+          ) : null;
+        })}
       </nav>
       <button
-        className="mt-auto flex min-h-12 items-center gap-3 rounded-xl p-3 text-sm text-emerald-100 hover:bg-white/10"
+        className="nav-item mt-auto text-slate-500"
         onClick={() => {
           clearTokens();
           navigate('/login');
         }}
       >
-        <LogOut size={20} />
+        <LogOut size={18} />
         {!collapsed && 'Cerrar sesión'}
       </button>
     </>
   );
   return (
-    <div className={`grid min-h-screen ${collapsed ? 'lg:grid-cols-[82px_1fr]' : 'lg:grid-cols-[260px_1fr]'}`}>
-      <aside className="hidden bg-brand-900 p-4 text-white lg:flex lg:flex-col">{sidebar}</aside>
+    <div className={`app-shell ${collapsed ? 'lg:grid-cols-[88px_1fr]' : 'lg:grid-cols-[268px_1fr]'}`}>
+      <aside className="sidebar hidden lg:flex">{sidebar}</aside>
       {drawer && (
-        <div className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" onClick={() => setDrawer(false)}>
-          <aside
-            className="flex h-full w-[min(86vw,320px)] flex-col bg-brand-900 p-4 text-white"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm lg:hidden" onClick={() => setDrawer(false)}>
+          <aside className="sidebar flex h-full w-[min(88vw,300px)]" onClick={(e) => e.stopPropagation()}>
             {sidebar}
           </aside>
         </div>
       )}
       <section className="min-w-0">
-        <header className="sticky top-0 z-30 flex min-h-20 flex-wrap items-center justify-between gap-3 border-b bg-white/95 px-4 py-3 backdrop-blur lg:px-8">
-          <button
-            className="rounded-lg p-3 hover:bg-slate-100"
-            onClick={() => (window.innerWidth < 1024 ? setDrawer(true) : setCollapsed(!collapsed))}
-            aria-label="Abrir navegación"
-          >
-            {collapsed ? <Menu /> : <ChevronLeft className="hidden lg:block" />}
-            <Menu className="lg:hidden" />
-          </button>
-          <ConnectionStatus />
-          <div className="hidden text-right md:block">
-            <b>
-              {me.user.firstName} {me.user.lastName}
-            </b>
-            <div className="flex items-center justify-end gap-2 text-sm text-slate-500">
-              {branches.length > 1 ? (
-                <select
-                  className="h-9 border-0 bg-transparent py-0 text-right text-sm"
-                  value={currentBranchId ?? ''}
-                  onChange={(event) => void onBranchChange(event.target.value || undefined)}
-                  aria-label="Sucursal actual"
-                >
-                  {!me.branch && <option value="">Todas las sucursales</option>}
-                  {branches.map((branch) => (
-                    <option value={branch.id} key={branch.id}>
-                      {branch.name}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span>{branches[0]?.name ?? me.branch?.name ?? 'Sin sucursal activa'}</span>
+        <header className="topbar">
+          <div className="flex items-center gap-2">
+            <button className="icon-button lg:hidden" onClick={() => setDrawer(true)} aria-label="Abrir navegación">
+              <Menu />
+            </button>
+            <button
+              className="icon-button hidden lg:grid"
+              onClick={() => setCollapsed(!collapsed)}
+              aria-label="Contraer navegación"
+            >
+              {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+            </button>
+          </div>
+          <label className="global-search">
+            <Search size={18} />
+            <input placeholder="Buscar productos, proveedores, facturas…" aria-label="Búsqueda global" />
+          </label>
+          <div className="ml-auto flex items-center gap-2">
+            <ConnectionStatus />
+            <button className="icon-button hidden sm:grid" aria-label="Notificaciones">
+              <Bell size={19} />
+              <span className="notification-dot" />
+            </button>
+            <div className="relative">
+              <button className="profile-button" onClick={() => setProfile(!profile)}>
+                <span className="avatar">
+                  {me.user.firstName[0]}
+                  {me.user.lastName[0]}
+                </span>
+                <span className="hidden text-left md:block">
+                  <b>
+                    {me.user.firstName} {me.user.lastName}
+                  </b>
+                  <small>{me.user.roles.map((r) => r.code).join(', ')}</small>
+                </span>
+              </button>
+              {profile && (
+                <div className="profile-menu">
+                  <p className="border-b p-3 text-sm font-semibold">{me.user.username}</p>
+                  <button
+                    onClick={() => {
+                      clearTokens();
+                      navigate('/login');
+                    }}
+                  >
+                    <LogOut size={16} /> Cerrar sesión
+                  </button>
+                </div>
               )}
-              <span>· {me.user.roles.map((r) => r.code).join(', ')}</span>
             </div>
           </div>
         </header>
-        <main className="p-4 sm:p-5 lg:p-8">{children}</main>
+        <div className="context-bar">
+          <div>
+            <span className="text-slate-400">Panel</span>
+            <ChevronRight size={14} />
+            <b>{groups.flatMap((g) => g.items).find((i) => i[0] === route)?.[1] ?? 'Inicio'}</b>
+          </div>
+          {branches.length > 0 && (
+            <label className="branch-select">
+              <Building2 size={15} />
+              <select value={currentBranchId ?? ''} onChange={(e) => void onBranchChange(e.target.value || undefined)}>
+                {!me.branch && <option value="">Todas las sucursales</option>}
+                {branches.map((b) => (
+                  <option value={b.id} key={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+        <main className="page-content">{children}</main>
       </section>
     </div>
   );
