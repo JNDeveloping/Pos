@@ -18,6 +18,10 @@ import { Labels } from './pages/Labels';
 import { Audit } from './pages/Audit';
 import { ProductDetail } from './pages/ProductDetail';
 import { BranchDetail } from './pages/BranchDetail';
+import { Suppliers } from './pages/Suppliers';
+import { Purchases } from './pages/Purchases';
+import { InvoiceImport } from './pages/InvoiceImport';
+import { SupplierDetail } from './pages/SupplierDetail';
 import { requestTabSession } from './lib/auth-session';
 const pages: Record<string, React.ReactNode> = {
   '/': <Dashboard />,
@@ -35,6 +39,9 @@ const pages: Record<string, React.ReactNode> = {
   '/price-lists': <PriceLists />,
   '/labels': <Labels />,
   '/audit': <Audit />,
+  '/suppliers': <Suppliers />,
+  '/purchases': <Purchases />,
+  '/purchases/invoices': <InvoiceImport />,
   '/admin/products': <Products />,
   '/admin/catalog': <Products mode="master" />,
   '/admin/prices': <Commerce kind="prices" />,
@@ -95,13 +102,19 @@ export default function App() {
       </>
     );
   const productMatch = route.match(/^\/(?:admin\/)?products\/([0-9a-f-]{36})$/i);
+  const supplierMatch = route.match(/^\/(?:admin\/)?suppliers\/([0-9a-f-]{36})$/i);
   const branchMatch = route.match(/^\/(?:admin\/)?branches\/([0-9a-f-]{36})$/i);
-  const page = productMatch ? <ProductDetail id={productMatch[1]} /> : branchMatch ? <BranchDetail id={branchMatch[1]} /> :
-    route === '/settings' && !me.permissions.includes('branches.settings') ? (
-      <div className="card p-6">No tenés permiso para configurar este dispositivo.</div>
-    ) : (
-      (pages[route] ?? pages['/'])
-    );
+  const page = productMatch ? (
+    <ProductDetail id={productMatch[1]} />
+  ) : supplierMatch ? (
+    <SupplierDetail id={supplierMatch[1]} />
+  ) : branchMatch ? (
+    <BranchDetail id={branchMatch[1]} />
+  ) : route === '/settings' && !me.permissions.includes('branches.settings') ? (
+    <div className="card p-6">No tenés permiso para configurar este dispositivo.</div>
+  ) : (
+    (pages[route] ?? pages['/'])
+  );
   return (
     <>
       <Layout

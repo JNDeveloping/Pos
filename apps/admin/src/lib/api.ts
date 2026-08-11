@@ -34,19 +34,20 @@ async function readApiBody(response: Response) {
 
 export async function api<T>(path: string, options: RequestInit = {}) {
   let token = sessionStorage.getItem('accessToken');
+  const requestHeaders = new Headers(options.headers);
+  if (!(options.body instanceof FormData) && !requestHeaders.has('Content-Type'))
+    requestHeaders.set('Content-Type', 'application/json');
+  if (token) requestHeaders.set('Authorization', `Bearer ${token}`);
   let response = await fetch(`${API}${path}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
+    headers: requestHeaders,
   });
   if (response.status === 401 && !path.startsWith('/auth/')) {
     token = await refreshAccessToken();
+    requestHeaders.set('Authorization', `Bearer ${token}`);
     response = await fetch(`${API}${path}`, {
       ...options,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...options.headers },
+      headers: requestHeaders,
     });
   }
   const body = await readApiBody(response);
@@ -67,8 +68,7 @@ function refreshAccessToken() {
 
 async function performRefresh() {
   const refreshToken = sessionStorage.getItem('refreshToken');
-  if (!refreshToken)
-    throw new Error('La sesión expiró. Volvé a ingresar.');
+  if (!refreshToken) throw new Error('La sesión expiró. Volvé a ingresar.');
   const response = await fetch(`${API}/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

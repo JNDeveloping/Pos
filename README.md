@@ -90,6 +90,10 @@ La aplicación continúa siendo instalable y el Service Worker controla exclusiv
 
 Productos avanzados, barcodes tipados, subcategorías, configuración por sucursal, precios, costos, actualizaciones masivas con preview, lista MINORISTA, etiquetas imprimibles y auditoría están documentados en `docs/MENSAJE_3.md`. Aplicar `npm run db:deploy` antes de reiniciar la API.
 
+El circuito de proveedores, órdenes, compras, recepción, documentos de factura,
+matching asistido y actualización confirmada de costos se documenta en
+`docs/MENSAJE_4.md`. La IA nunca confirma una compra automáticamente.
+
 ## Actualización de un despliegue existente
 
 Si los archivos se copian encima de una versión anterior, pueden quedar directorios que ya no pertenecen al proyecto (por ejemplo `apps/admin/src/offline` o `apps/api/src/modules/sync`). El build ejecuta una limpieza preventiva, pero en producción se recomienda:

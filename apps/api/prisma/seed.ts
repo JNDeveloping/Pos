@@ -36,6 +36,20 @@ const permissionCodes = [
   'priceLists.view',
   'priceLists.manage',
   'stock.view',
+  'suppliers.view',
+  'suppliers.create',
+  'suppliers.update',
+  'suppliers.disable',
+  'purchases.view',
+  'purchases.create',
+  'purchases.update',
+  'purchases.confirm',
+  'purchases.cancel',
+  'purchaseOrders.view',
+  'purchaseOrders.manage',
+  'invoiceAI.use',
+  'invoiceAI.review',
+  'costs.applyFromPurchase',
 ];
 async function main() {
   const password = process.env.SEED_ADMIN_PASSWORD;

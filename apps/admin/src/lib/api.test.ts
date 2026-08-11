@@ -71,8 +71,8 @@ describe('cliente API', () => {
             headers: { 'Content-Type': 'application/json' },
           });
         }
-        const authorization = init?.headers as Record<string, string> | undefined;
-        return authorization?.Authorization === 'Bearer new-access'
+        const authorization = new Headers(init?.headers).get('Authorization');
+        return authorization === 'Bearer new-access'
           ? new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
           : new Response(JSON.stringify({ message: 'Unauthorized' }), {
               status: 401,

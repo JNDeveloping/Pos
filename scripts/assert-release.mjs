@@ -4,10 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const forbidden = [
-  'apps/admin/src/offline',
-  'apps/api/src/modules/sync',
-];
+const forbidden = ['apps/admin/src/offline', 'apps/api/src/modules/sync'];
 for (const relativePath of forbidden) {
   try {
     await access(resolve(root, relativePath), constants.F_OK);
@@ -21,7 +18,15 @@ const migrations = (await readdir(resolve(root, 'apps/api/prisma/migrations'), {
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name);
 const requiredMigration = '20260812120000_message3_commercial_catalog';
+const purchasesMigration = '20260813120000_message4_purchases';
 if (!migrations.includes(requiredMigration)) {
-  throw new Error(`Checkout incompleto: falta la migración ${requiredMigration}. Actualice el código antes de desplegar.`);
+  throw new Error(
+    `Checkout incompleto: falta la migración ${requiredMigration}. Actualice el código antes de desplegar.`,
+  );
+}
+if (!migrations.includes(purchasesMigration)) {
+  throw new Error(
+    `La copia está incompleta: falta ${purchasesMigration}. Actualice el repositorio antes de desplegar.`,
+  );
 }
 console.log(`Release verificada: ${migrations.length} migraciones y sin fuentes offline obsoletas.`);

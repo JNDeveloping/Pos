@@ -17,6 +17,8 @@ import {
   CircleDollarSign,
   Printer,
   ScrollText,
+  Truck,
+  ShoppingCart,
   X,
 } from 'lucide-react';
 import type { Me } from '../lib/api';
@@ -36,6 +38,8 @@ const items = [
   ['/price-lists', 'Listas de precios', Tags, 'priceLists.view'],
   ['/labels', 'Etiquetas', Printer, 'labels.view'],
   ['/audit', 'Auditoría', ScrollText, 'audit.view'],
+  ['/suppliers', 'Proveedores', Truck, 'suppliers.view'],
+  ['/purchases', 'Compras', ShoppingCart, 'purchases.view'],
   ['/categories', 'Categorías', FolderTree, 'categories.view'],
   ['/brands', 'Marcas', Tags, 'brands.view'],
   ['/roles', 'Roles y permisos', ShieldCheck, 'roles.view'],
