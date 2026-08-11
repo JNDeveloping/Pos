@@ -73,9 +73,10 @@ La migración inicial versionada se encuentra en `apps/api/prisma/migrations`. D
 `docker-compose.yml` ofrece PostgreSQL, Redis y API con volúmenes persistentes. Para VPS se deben reemplazar secretos, usar TLS/Nginx, no publicar las bases, ejecutar migraciones antes del arranque y automatizar backups.
 
 El despliegue solicitado utiliza `https://grupolosnietos.com.ar/pos/`, proxy de API en `/pos/api` y el puerto interno
-3002, sin interferir con el servicio existente en 3001. La guía y el snippet Nginx están en
-[`docs/DESPLIEGUE_DOMINIO.md`](docs/DESPLIEGUE_DOMINIO.md) e
-[`infra/nginx/grupolosnietos-pos.conf`](infra/nginx/grupolosnietos-pos.conf).
+3002, sin interferir con el servicio existente en 3001. La guía está en
+[`docs/DESPLIEGUE_DOMINIO.md`](docs/DESPLIEGUE_DOMINIO.md) e incluye snippets para
+[`Nginx`](infra/nginx/grupolosnietos-pos.conf) y
+[`Apache VirtualHost`](infra/apache/grupolosnietos-pos.conf).
 
 ## PWA y funcionamiento offline
 
