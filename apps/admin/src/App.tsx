@@ -40,6 +40,11 @@ export default function App() {
   }, []);
   useEffect(() => {
     async function restore() {
+      const cached = await offlineSession();
+      if (cached) {
+        setMe(cached);
+        setReady(true);
+      }
       if (token) {
         try {
           const online = await api<Me>('/auth/me');
@@ -52,29 +57,30 @@ export default function App() {
           /* The server may be unavailable; fall through to the limited cached session. */
         }
       }
-      const cached = await offlineSession();
-      if (cached) setMe(cached);
-      setReady(true);
+      if (!cached) setReady(true);
     }
     void restore();
   }, [token]);
   useEffect(() => {
     if (!me) return;
     async function configureBranch() {
-      let available: Branch[];
+      const apply = async (available: Branch[]) => {
+        setBranches(available);
+        const device = await deviceConfig();
+        const selected = available.find((branch) => branch.id === device.branchId)?.id;
+        const nextBranchId = available.length === 1 ? available[0].id : selected;
+        setCurrentBranchId(nextBranchId);
+        if (nextBranchId !== device.branchId) {
+          await saveDeviceConfig({ ...device, branchId: nextBranchId });
+          if (connectivityService.current === 'ONLINE') void syncService.rebuild();
+        }
+      };
+      const local = (await offlineDb.branches.toArray()).filter((branch) => branch.active) as Branch[];
+      if (local.length) await apply(local);
       try {
-        available = (await api<Branch[]>('/branches')).filter((branch) => branch.active);
+        await apply((await api<Branch[]>('/branches')).filter((branch) => branch.active));
       } catch {
-        available = (await offlineDb.branches.toArray()).filter((branch) => branch.active) as Branch[];
-      }
-      setBranches(available);
-      const device = await deviceConfig();
-      const selected = available.find((branch) => branch.id === device.branchId)?.id;
-      const nextBranchId = available.length === 1 ? available[0].id : selected;
-      setCurrentBranchId(nextBranchId);
-      if (nextBranchId !== device.branchId) {
-        await saveDeviceConfig({ ...device, branchId: nextBranchId });
-        if (connectivityService.current === 'ONLINE') void syncService.rebuild();
+        // The local branch context was already applied; a network error must not block startup.
       }
     }
     void configureBranch();

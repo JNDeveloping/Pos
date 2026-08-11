@@ -1,9 +1,13 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileSpreadsheet, PackagePlus, Search, X } from 'lucide-react';
 import { api } from '../lib/api';
-import { offlineDb } from '../offline/db/database';
 import { deviceConfig } from '../offline/db/device';
-import { catalogRepository } from '../offline/repositories/catalog.repository';
+import {
+  brandRepository,
+  branchRepository,
+  categoryRepository,
+  productRepository,
+} from '../offline/repositories/domain.repositories';
 type Ref = { id: string; name: string };
 type Config = {
   id: string;
@@ -37,8 +41,16 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     [branchId, setBranchId] = useState<string>(),
     [enabledFilter, setEnabledFilter] = useState<'all' | 'true' | 'false'>(mode === 'branch' ? 'true' : 'all'),
     [enableDuringImport, setEnableDuringImport] = useState(mode === 'branch'),
-    [importing, setImporting] = useState('');
+    [importing, setImporting] = useState(''),
+    [refreshing, setRefreshing] = useState(false),
+    [localOnly, setLocalOnly] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const load = async () => {
+    const enabled = enabledFilter === 'all' ? undefined : enabledFilter === 'true';
+    const local = (await productRepository.searchLocal(search, branchId, enabled, page, 20)) as unknown as Page;
+    setResult(local);
+    setLocalOnly(false);
+    setRefreshing(true);
     try {
       const params = new URLSearchParams({ search, page: String(page), limit: '20' });
       if (branchId && enabledFilter !== 'all') {
@@ -47,43 +59,36 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
       }
       setResult(await api<Page>(`/products?${params}`));
     } catch {
-      const all = (await catalogRepository.productViews()) as unknown as Product[];
-      const term = search.toLocaleLowerCase('es');
-      const filtered = all
-        .filter(
-          (product) =>
-            !term ||
-            product.name.toLocaleLowerCase('es').includes(term) ||
-            product.internalCode.toLocaleLowerCase('es').includes(term) ||
-            product.barcodes.some((barcode) => barcode.barcode.includes(term)),
-        )
-        .filter(
-          (product) =>
-            enabledFilter === 'all' ||
-            !branchId ||
-            product.branchConfigs.some((x) => x.branch.id === branchId && x.enabled) === (enabledFilter === 'true'),
-        );
-      setResult({
-        data: filtered.slice((page - 1) * 20, page * 20),
-        meta: { page, pages: Math.ceil(filtered.length / 20), total: filtered.length },
-      });
+      setLocalOnly(true);
+    } finally {
+      setRefreshing(false);
     }
   };
   useEffect(() => {
     void load();
   }, [page, branchId, enabledFilter, mode]);
   useEffect(() => {
-    Promise.all([
-      api<Ref[]>('/categories').catch(() => offlineDb.categories.toArray()),
-      api<Ref[]>('/brands').catch(() => offlineDb.brands.toArray()),
-      api<Ref[]>('/branches').catch(() => offlineDb.branches.toArray()),
-    ]).then(([c, b, br]) => {
+    Promise.all([categoryRepository.local(), brandRepository.local(), branchRepository.local()]).then(([c, b, br]) => {
       setCategories(c);
       setBrands(b);
       setBranches(br);
     });
+    Promise.all([categoryRepository.refresh(), brandRepository.refresh(), branchRepository.refresh()])
+      .then(([c, b, br]) => {
+        setCategories(c);
+        setBrands(b);
+        setBranches(br);
+      })
+      .catch(() => undefined);
     void deviceConfig().then((device) => setBranchId(device.branchId));
   }, []);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (dirty) event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
   async function create(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
@@ -96,6 +101,17 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         brandId: f.get('brandId') || undefined,
         unitType: f.get('unitType'),
         taxRate: f.get('taxRate'),
+        shortName: f.get('shortName') || undefined,
+        description: f.get('description') || undefined,
+        sku: f.get('sku') || undefined,
+        supplierCode: f.get('supplierCode') || undefined,
+        presentation: f.get('presentation') || undefined,
+        netContent: f.get('netContent') || undefined,
+        contentUnit: f.get('contentUnit') || undefined,
+        unitsPerCase: f.get('unitsPerCase') ? Number(f.get('unitsPerCase')) : undefined,
+        caseBarcode: f.get('caseBarcode') || undefined,
+        isWeighted: f.get('isWeighted') === 'on',
+        allowManualPrice: f.get('allowManualPrice') === 'on',
       }),
     });
     for (const b of branches.filter((branch) => branch.id === branchId)) {
@@ -103,13 +119,24 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         salePrice = String(f.get(`price-${b.id}`) || '0');
       await api(`/products/${p.id}/branches/${b.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ cost, salePrice, stockMinimum: String(f.get(`stock-${b.id}`) || '0') }),
+        body: JSON.stringify({
+          cost,
+          salePrice,
+          stockMinimum: String(f.get(`stock-${b.id}`) || '0'),
+          enabled: true,
+          posFavorite: f.get(`favorite-${b.id}`) === 'on',
+          allowManualPrice: f.get(`manual-${b.id}`) === 'on',
+          location: f.get(`location-${b.id}`) || undefined,
+          shelf: f.get(`shelf-${b.id}`) || undefined,
+          internalNotes: f.get(`notes-${b.id}`) || undefined,
+        }),
       });
     }
     const barcode = String(f.get('barcode') || '');
     if (barcode)
       await api(`/products/${p.id}/barcodes`, { method: 'POST', body: JSON.stringify({ barcode, isPrimary: true }) });
     setShow(false);
+    setDirty(false);
     load();
   }
   async function importExcel(file: File) {
@@ -199,6 +226,12 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         </div>
       </div>
       {importing && <p className="mt-4 rounded-xl bg-brand-50 p-4 text-sm text-brand-800">{importing}</p>}
+      {localOnly && (
+        <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">
+          Sin conexión. Mostrando datos guardados en este dispositivo.
+        </p>
+      )}
+      {refreshing && <p className="mt-3 text-sm text-slate-500">Actualizando en segundo plano…</p>}
       <label className="mt-4 flex min-h-11 items-center gap-3 text-sm font-medium">
         <input
           type="checkbox"
@@ -346,7 +379,11 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
       </div>
       {show && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/50 p-4">
-          <form onSubmit={create} className="mx-auto my-6 max-w-4xl rounded-2xl bg-white p-6 shadow-2xl">
+          <form
+            onSubmit={create}
+            onChange={() => setDirty(true)}
+            className="mx-auto my-6 max-w-5xl rounded-2xl bg-white p-6 shadow-2xl"
+          >
             <div className="flex justify-between">
               <div>
                 <h2 className="text-2xl font-bold">Nuevo producto</h2>
@@ -354,7 +391,10 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                   Se crea en el catálogo maestro y se habilita sólo en la sucursal actual.
                 </p>
               </div>
-              <button type="button" onClick={() => setShow(false)}>
+              <button
+                type="button"
+                onClick={() => (!dirty || confirm('Hay cambios sin guardar. ¿Salir igualmente?')) && setShow(false)}
+              >
                 <X />
               </button>
             </div>
@@ -362,6 +402,8 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <input name="internalCode" placeholder="Código interno" required />
               <input name="name" placeholder="Nombre" required />
+              <input name="shortName" placeholder="Nombre corto" />
+              <textarea name="description" placeholder="Descripción" className="md:col-span-2" />
               <select name="categoryId" required>
                 <option value="">Categoría</option>
                 {categories.map((x) => (
@@ -384,6 +426,29 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
               <input name="taxRate" type="number" min="0" value="21" readOnly />
               <input name="barcode" placeholder="Código de barras principal" />
             </div>
+            <h3 className="mt-8 font-bold">Identificación y presentación</h3>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <input name="sku" placeholder="SKU opcional" />
+              <input name="supplierCode" placeholder="Código de proveedor" />
+              <select name="presentation">
+                <option value="">Presentación</option>
+                {['BOTELLA', 'LATA', 'PAQUETE', 'CAJA', 'BOLSA', 'FRASCO', 'SACHET', 'UNIDAD', 'PACK', 'OTRO'].map(
+                  (x) => (
+                    <option key={x}>{x}</option>
+                  ),
+                )}
+              </select>
+              <input name="netContent" type="number" min="0" step="0.001" placeholder="Contenido neto" />
+              <input name="contentUnit" placeholder="Unidad contenido (LITRO, KG…)" />
+              <input name="unitsPerCase" type="number" min="1" placeholder="Unidades por bulto" />
+              <input name="caseBarcode" placeholder="Código de bulto" />
+              <label className="flex items-center gap-2">
+                <input name="isWeighted" type="checkbox" /> Producto pesable
+              </label>
+              <label className="flex items-center gap-2">
+                <input name="allowManualPrice" type="checkbox" /> Permitir precio manual
+              </label>
+            </div>
             <h3 className="mt-8 font-bold">Configuración por sucursal</h3>
             <div className="mt-3 grid gap-3">
               {branches
@@ -395,6 +460,15 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                       <input name={`cost-${b.id}`} type="number" min="0" step="0.01" placeholder="Costo" />
                       <input name={`price-${b.id}`} type="number" min="0" step="0.01" placeholder="Precio" />
                       <input name={`stock-${b.id}`} type="number" min="0" step="0.001" placeholder="Stock mínimo" />
+                      <input name={`location-${b.id}`} placeholder="Ubicación (Pasillo / Góndola)" />
+                      <input name={`shelf-${b.id}`} placeholder="Estante" />
+                      <input name={`notes-${b.id}`} placeholder="Notas internas" />
+                      <label className="flex items-center gap-2">
+                        <input name={`favorite-${b.id}`} type="checkbox" /> Favorito POS
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input name={`manual-${b.id}`} type="checkbox" /> Precio manual en sucursal
+                      </label>
                     </div>
                   </fieldset>
                 ))}

@@ -19,29 +19,28 @@ export function Dashboard() {
   useEffect(() => {
     async function load() {
       const device = await deviceConfig();
+      const [products, activeProducts, activeBranches, categories] = await Promise.all([
+        offlineDb.products.count(),
+        offlineDb.products.filter((product) => product.active).count(),
+        offlineDb.branches.filter((branch) => branch.active).count(),
+        offlineDb.categories.count(),
+      ]);
+      setS({
+        products,
+        activeProducts,
+        activeBranches,
+        activeUsers: await offlineDb.usersCache.count(),
+        categories,
+        productsWithoutPrice: await offlineDb.branchProducts.filter((config) => Number(config.salePrice) === 0).count(),
+        productsWithoutBranchConfig: 0,
+        enabledInBranch: await offlineDb.branchProducts
+          .filter((config) => config.enabled && (!device.branchId || config.branchId === device.branchId))
+          .count(),
+      });
       try {
         setS(await api<S>(`/dashboard/summary${device.branchId ? `?branchId=${device.branchId}` : ''}`));
       } catch {
-        const [products, activeProducts, activeBranches, categories] = await Promise.all([
-          offlineDb.products.count(),
-          offlineDb.products.filter((product) => product.active).count(),
-          offlineDb.branches.filter((branch) => branch.active).count(),
-          offlineDb.categories.count(),
-        ]);
-        setS({
-          products,
-          activeProducts,
-          activeBranches,
-          activeUsers: await offlineDb.usersCache.count(),
-          categories,
-          productsWithoutPrice: await offlineDb.branchProducts
-            .filter((config) => Number(config.salePrice) === 0)
-            .count(),
-          productsWithoutBranchConfig: 0,
-          enabledInBranch: await offlineDb.branchProducts
-            .filter((config) => config.enabled && (!device.branchId || config.branchId === device.branchId))
-            .count(),
-        });
+        // Local metrics are already visible; connectivity is reported globally.
       }
     }
     void load();

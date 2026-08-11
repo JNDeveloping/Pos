@@ -42,6 +42,15 @@ class ProductDto {
   @IsEnum(UnitType) unitType: UnitType = UnitType.UNIT;
   @IsNumberString() taxRate = '21';
   @IsOptional() @IsString() imageUrl?: string;
+  @IsOptional() @IsString() sku?: string;
+  @IsOptional() @IsString() supplierCode?: string;
+  @IsOptional() @IsString() presentation?: string;
+  @IsOptional() @IsNumberString() netContent?: string;
+  @IsOptional() @IsString() contentUnit?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) unitsPerCase?: number;
+  @IsOptional() @IsString() caseBarcode?: string;
+  @IsOptional() @IsBoolean() isWeighted?: boolean;
+  @IsOptional() @IsBoolean() allowManualPrice?: boolean;
 }
 class ProductPatchDto {
   @IsOptional() @IsString() @Length(2, 50) internalCode?: string;
@@ -54,6 +63,15 @@ class ProductPatchDto {
   @IsOptional() @IsNumberString() taxRate?: string;
   @IsOptional() @IsString() imageUrl?: string;
   @IsOptional() @IsBoolean() active?: boolean;
+  @IsOptional() @IsString() sku?: string;
+  @IsOptional() @IsString() supplierCode?: string;
+  @IsOptional() @IsString() presentation?: string;
+  @IsOptional() @IsNumberString() netContent?: string;
+  @IsOptional() @IsString() contentUnit?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) unitsPerCase?: number;
+  @IsOptional() @IsString() caseBarcode?: string;
+  @IsOptional() @IsBoolean() isWeighted?: boolean;
+  @IsOptional() @IsBoolean() allowManualPrice?: boolean;
 }
 class BarcodeDto {
   @IsString() @Length(1, 64) @Matches(/^\d+$/, { message: 'El código debe ser numérico' }) barcode!: string;
@@ -65,6 +83,11 @@ class ConfigDto {
   @IsOptional() @IsNumberString() margin?: string;
   @IsOptional() @IsNumberString() stockMinimum?: string;
   @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsBoolean() posFavorite?: boolean;
+  @IsOptional() @IsBoolean() allowManualPrice?: boolean;
+  @IsOptional() @IsString() location?: string;
+  @IsOptional() @IsString() shelf?: string;
+  @IsOptional() @IsString() internalNotes?: string;
 }
 class ListQuery {
   @IsOptional() @IsString() search?: string;
@@ -318,6 +341,11 @@ class ProductsController {
           margin,
           stockMinimum: this.money(d.stockMinimum ?? 0),
           enabled: d.enabled ?? true,
+          posFavorite: d.posFavorite ?? false,
+          allowManualPrice: d.allowManualPrice,
+          location: d.location,
+          shelf: d.shelf,
+          internalNotes: d.internalNotes,
         },
         update: {
           cost,
@@ -325,6 +353,11 @@ class ProductsController {
           margin,
           stockMinimum: d.stockMinimum !== undefined ? this.money(d.stockMinimum) : undefined,
           enabled: d.enabled,
+          posFavorite: d.posFavorite,
+          allowManualPrice: d.allowManualPrice,
+          location: d.location,
+          shelf: d.shelf,
+          internalNotes: d.internalNotes,
         },
       });
       if (current && !current.salePrice.equals(price))

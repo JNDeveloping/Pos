@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Building2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
+import { branchRepository } from '../offline/repositories/domain.repositories';
 
 export type Branch = {
   id: string;
@@ -10,10 +11,26 @@ export type Branch = {
   city?: string;
   province?: string;
   phone?: string;
+  whatsapp?: string;
+  email?: string;
+  postalCode?: string;
+  businessHours?: string;
   active: boolean;
 };
 
-const emptyForm = { name: '', code: '', address: '', city: '', province: '', phone: '', copyFromBranchId: '' };
+const emptyForm = {
+  name: '',
+  code: '',
+  address: '',
+  city: '',
+  province: '',
+  postalCode: '',
+  phone: '',
+  whatsapp: '',
+  email: '',
+  businessHours: '',
+  copyFromBranchId: '',
+};
 
 export function Branches() {
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -21,7 +38,14 @@ export function Branches() {
   const [open, setOpen] = useState(false);
   const [created, setCreated] = useState<Branch>();
   const [error, setError] = useState('');
-  const load = () => api<Branch[]>('/branches').then(setBranches);
+  const load = async () => {
+    setBranches((await branchRepository.local()) as Branch[]);
+    try {
+      setBranches((await branchRepository.refresh()) as Branch[]);
+    } catch {
+      /* Keep local branches. */
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -118,7 +142,20 @@ export function Branches() {
               </button>
             </div>
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
-              {(['name', 'code', 'address', 'city', 'province', 'phone'] as const).map((field) => (
+              {(
+                [
+                  'name',
+                  'code',
+                  'address',
+                  'city',
+                  'province',
+                  'postalCode',
+                  'phone',
+                  'whatsapp',
+                  'email',
+                  'businessHours',
+                ] as const
+              ).map((field) => (
                 <label className="grid gap-2 text-sm font-semibold" key={field}>
                   {
                     {
@@ -127,7 +164,11 @@ export function Branches() {
                       address: 'Dirección',
                       city: 'Localidad',
                       province: 'Provincia',
+                      postalCode: 'Código postal',
                       phone: 'Teléfono',
+                      whatsapp: 'WhatsApp',
+                      email: 'Email',
+                      businessHours: 'Horario comercial',
                     }[field]
                   }
                   <input

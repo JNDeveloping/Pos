@@ -11,6 +11,13 @@ await page.getByLabel('Contraseña').fill('Cambiar123!');
 await page.getByRole('button', { name: 'Ingresar' }).click();
 await page.waitForURL('http://localhost:4173/pos/');
 await page.getByText('Panel administrativo').waitFor();
+const secondPage = await context.newPage();
+await secondPage.goto('http://localhost:4173/pos/categories', { waitUntil: 'domcontentloaded' });
+await secondPage.getByRole('heading', { name: 'Categorías' }).waitFor();
+const stableUrls = [page.url(), secondPage.url()];
+await page.waitForTimeout(10_000);
+if (page.url() !== stableUrls[0] || secondPage.url() !== stableUrls[1])
+  throw new Error('Una pestaña navegó o se recargó inesperadamente');
 await page.evaluate(() => navigator.serviceWorker.ready);
 const pwa = await page.evaluate(async () => {
   const manifestLink = document.querySelector('link[rel="manifest"]');

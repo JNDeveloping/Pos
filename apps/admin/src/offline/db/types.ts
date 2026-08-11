@@ -7,7 +7,19 @@ export interface LocalProduct {
   brandId?: string | null;
   internalCode: string;
   name: string;
+  normalizedName: string;
+  searchTerms: string[];
   description?: string | null;
+  shortName?: string | null;
+  sku?: string | null;
+  supplierCode?: string | null;
+  presentation?: string | null;
+  netContent?: string | null;
+  contentUnit?: string | null;
+  unitsPerCase?: number | null;
+  caseBarcode?: string | null;
+  isWeighted?: boolean;
+  allowManualPrice?: boolean;
   unitType: string;
   taxRate: string;
   imageUrl?: string | null;
@@ -61,6 +73,11 @@ export interface LocalBranchProduct {
   margin: string;
   stockMinimum: string;
   enabled: boolean;
+  posFavorite?: boolean;
+  allowManualPrice?: boolean | null;
+  location?: string | null;
+  shelf?: string | null;
+  internalNotes?: string | null;
   updatedAt: string;
 }
 export interface LocalUserCache {

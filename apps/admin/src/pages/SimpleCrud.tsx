@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
+import { brandRepository, categoryRepository } from '../offline/repositories/domain.repositories';
 type Item = { id: string; name: string; code?: string; active: boolean };
 export function SimpleCrud({
   title,
@@ -16,7 +17,15 @@ export function SimpleCrud({
   const [items, setItems] = useState<Item[]>([]),
     [name, setName] = useState(''),
     [code, setCode] = useState('');
-  const load = () => api<Item[]>(path).then(setItems);
+  const repository = path === '/categories' ? categoryRepository : path === '/brands' ? brandRepository : undefined;
+  const load = async () => {
+    if (repository) setItems((await repository.local()) as Item[]);
+    try {
+      setItems(await api<Item[]>(path));
+    } catch {
+      /* Local data remains visible offline. */
+    }
+  };
   useEffect(() => {
     void load();
   }, [path]);

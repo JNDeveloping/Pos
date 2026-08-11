@@ -112,6 +112,27 @@ model Branch {
   city           String?
   province       String?
   phone          String?
+  whatsapp       String?
+  email          String?
+  postalCode     String?
+  businessHours  String?
+  defaultMargin  Decimal         @default(30) @db.Decimal(7, 2)
+  defaultTaxRate Decimal         @default(21) @db.Decimal(5, 2)
+  roundingMode   RoundingMode    @default(TEN)
+  allowDiscounts Boolean         @default(false)
+  maxDiscount    Decimal         @default(0) @db.Decimal(5, 2)
+  allowManualPrice Boolean       @default(false)
+  requireCashOpen Boolean        @default(true)
+  autoPrintTicket Boolean        @default(true)
+  ticketWidth    Int             @default(80)
+  pricesIncludeTax Boolean       @default(true)
+  ticketTradeName String?
+  ticketAddress  String?
+  ticketPhone    String?
+  ticketFooter   String?
+  ticketShowCuit Boolean         @default(true)
+  ticketShowCashier Boolean      @default(true)
+  ticketShowSaleCode Boolean     @default(true)
   active         Boolean         @default(true)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -253,6 +274,15 @@ model Product {
   name          String
   shortName     String?
   description   String?
+  sku           String?
+  supplierCode  String?
+  presentation  String?
+  netContent    Decimal?         @db.Decimal(12, 3)
+  contentUnit   String?
+  unitsPerCase  Int?
+  caseBarcode   String?
+  isWeighted    Boolean          @default(false)
+  allowManualPrice Boolean       @default(false)
   unitType      UnitType         @default(UNIT)
   taxRate       Decimal          @default(21) @db.Decimal(5, 2)
   imageUrl      String?
@@ -296,6 +326,11 @@ model BranchProduct {
   margin       Decimal  @default(0) @db.Decimal(9, 2)
   stockMinimum Decimal  @default(0) @db.Decimal(14, 3)
   enabled      Boolean  @default(true)
+  posFavorite  Boolean  @default(false)
+  allowManualPrice Boolean?
+  location     String?
+  shelf        String?
+  internalNotes String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

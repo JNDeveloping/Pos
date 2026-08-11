@@ -9,6 +9,8 @@ export type Me = {
 };
 
 type ApiErrorBody = { error?: { message?: string }; message?: string };
+type Tokens = { accessToken: string; refreshToken: string };
+let refreshInFlight: Promise<string> | undefined;
 
 async function readApiBody(response: Response) {
   const raw = await response.text();
@@ -30,8 +32,8 @@ async function readApiBody(response: Response) {
 }
 
 export async function api<T>(path: string, options: RequestInit = {}) {
-  const token = sessionStorage.getItem('accessToken');
-  const response = await fetch(`${API}${path}`, {
+  let token = sessionStorage.getItem('accessToken');
+  let response = await fetch(`${API}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -39,10 +41,12 @@ export async function api<T>(path: string, options: RequestInit = {}) {
       ...options.headers,
     },
   });
-  if (response.status === 401) {
-    sessionStorage.removeItem('accessToken');
-    sessionStorage.removeItem('refreshToken');
-    if (!path.includes('/auth/')) navigate('/login');
+  if (response.status === 401 && !path.startsWith('/auth/')) {
+    token = await refreshAccessToken();
+    response = await fetch(`${API}${path}`, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...options.headers },
+    });
   }
   const body = await readApiBody(response);
   if (!response.ok) {
@@ -50,5 +54,35 @@ export async function api<T>(path: string, options: RequestInit = {}) {
     throw new Error(error?.error?.message ?? error?.message ?? `Error HTTP ${response.status}`);
   }
   return body as T;
+}
+
+function refreshAccessToken() {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = performRefresh().finally(() => {
+    refreshInFlight = undefined;
+  });
+  return refreshInFlight;
+}
+
+async function performRefresh() {
+  const refreshToken = sessionStorage.getItem('refreshToken');
+  if (!refreshToken)
+    throw new Error('La sesión online expiró. Podés continuar offline si este dispositivo está preparado.');
+  const response = await fetch(`${API}/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  });
+  const body = (await readApiBody(response)) as Tokens | ApiErrorBody;
+  if (!response.ok) {
+    sessionStorage.removeItem('accessToken');
+    sessionStorage.removeItem('refreshToken');
+    navigate('/login');
+    throw new Error((body as ApiErrorBody).error?.message ?? 'La sesión expiró');
+  }
+  const tokens = body as Tokens;
+  sessionStorage.setItem('accessToken', tokens.accessToken);
+  sessionStorage.setItem('refreshToken', tokens.refreshToken);
+  return tokens.accessToken;
 }
 export const can = (me: Me | undefined, p: string) => me?.permissions.includes(p) ?? false;

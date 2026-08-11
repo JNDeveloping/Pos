@@ -22,9 +22,12 @@ export interface SyncState {
 }
 export class SyncService {
   private running?: Promise<void>;
+  private initialized?: Promise<void>;
   private listeners = new Set<Listener>();
   private state: SyncState = { status: connectivityService.current, pending: 0 };
   private reconnectTimer?: number;
+  private lastConnectivity = connectivityService.current;
+  private channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel('rincon-sync');
   subscribe(fn: Listener) {
     this.listeners.add(fn);
     fn(this.state);
@@ -37,40 +40,59 @@ export class SyncService {
     this.listeners.forEach((x) => x(this.state));
   }
   async initialize() {
+    if (this.initialized) return this.initialized;
+    this.initialized = this.initializeOnce();
+    return this.initialized;
+  }
+  private async initializeOnce() {
     const meta = await offlineDb.syncMetadata.get('lastSuccessfulSync');
     await this.emit({ lastSuccessfulSync: meta?.value });
     connectivityService.subscribe((status) => {
-      void this.emit({ status });
-      if (status === 'ONLINE') {
+      const recovered = status === 'ONLINE' && this.lastConnectivity !== 'ONLINE';
+      this.lastConnectivity = status;
+      void this.emit({ status: this.running ? 'SYNCING' : status });
+      if (recovered) {
         clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = window.setTimeout(() => void this.sync(), 1500);
+        this.reconnectTimer = window.setTimeout(() => void this.sync(), 0);
       }
+    });
+    this.channel?.addEventListener('message', (event: MessageEvent<{ type: string; at?: string }>) => {
+      if (event.data.type === 'SYNC_COMPLETED')
+        void this.emit({ status: connectivityService.current, lastSuccessfulSync: event.data.at, progress: undefined });
     });
   }
   sync() {
     if (this.running) return this.running;
-    this.running = this.run().finally(() => {
+    this.running = this.withLeaderLock().finally(() => {
       this.running = undefined;
     });
     return this.running;
+  }
+  private async withLeaderLock() {
+    if (!navigator.locks) return this.run();
+    await navigator.locks.request('rincon-catalog-sync', { ifAvailable: true }, async (lock) => {
+      if (!lock) {
+        await this.emit({ status: connectivityService.current, progress: 'Sincronización activa en otra pestaña' });
+        return;
+      }
+      await this.run();
+    });
   }
   private async run() {
     if (!(await connectivityService.probe())) {
       await this.emit({ status: connectivityService.current });
       return;
     }
-    connectivityService.set('SYNCING');
     await this.emit({ status: 'SYNCING', error: undefined, progress: 'Enviando operaciones pendientes' });
     try {
       await this.push();
       await this.pull();
       const now = new Date().toISOString();
       await offlineDb.syncMetadata.put({ key: 'lastSuccessfulSync', value: now, updatedAt: now });
-      connectivityService.set('ONLINE');
       await this.emit({ status: 'ONLINE', lastSuccessfulSync: now, progress: undefined });
+      this.channel?.postMessage({ type: 'SYNC_COMPLETED', at: now });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Error de sincronización';
-      connectivityService.set('SYNC_ERROR');
       await this.emit({ status: 'SYNC_ERROR', error: message, progress: undefined });
     }
   }

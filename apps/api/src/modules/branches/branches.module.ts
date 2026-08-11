@@ -1,6 +1,6 @@
 import { ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Module, NotFoundException, Param, Patch, Post } from '@nestjs/common';
-import { IsBoolean, IsOptional, IsString, IsUUID, Length } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsNumberString, IsOptional, IsString, IsUUID, Length } from 'class-validator';
 import { CurrentSession, RequirePermissions, Session } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
 class BranchDto {
@@ -10,6 +10,26 @@ class BranchDto {
   @IsOptional() @IsString() city?: string;
   @IsOptional() @IsString() province?: string;
   @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsString() whatsapp?: string;
+  @IsOptional() @IsEmail() email?: string;
+  @IsOptional() @IsString() postalCode?: string;
+  @IsOptional() @IsString() businessHours?: string;
+  @IsOptional() @IsNumberString() defaultMargin?: string;
+  @IsOptional() @IsNumberString() defaultTaxRate?: string;
+  @IsOptional() @IsBoolean() allowDiscounts?: boolean;
+  @IsOptional() @IsNumberString() maxDiscount?: string;
+  @IsOptional() @IsBoolean() allowManualPrice?: boolean;
+  @IsOptional() @IsBoolean() requireCashOpen?: boolean;
+  @IsOptional() @IsBoolean() autoPrintTicket?: boolean;
+  @IsOptional() @IsIn([58, 80]) ticketWidth?: number;
+  @IsOptional() @IsBoolean() pricesIncludeTax?: boolean;
+  @IsOptional() @IsString() ticketTradeName?: string;
+  @IsOptional() @IsString() ticketAddress?: string;
+  @IsOptional() @IsString() ticketPhone?: string;
+  @IsOptional() @IsString() ticketFooter?: string;
+  @IsOptional() @IsBoolean() ticketShowCuit?: boolean;
+  @IsOptional() @IsBoolean() ticketShowCashier?: boolean;
+  @IsOptional() @IsBoolean() ticketShowSaleCode?: boolean;
   @IsOptional() @IsBoolean() active?: boolean;
   @IsOptional() @IsUUID() copyFromBranchId?: string;
 }
@@ -45,15 +65,34 @@ class BranchesController {
       if (copyFromBranchId) {
         const sourceProducts = await tx.branchProduct.findMany({ where: { branchId: copyFromBranchId } });
         await tx.branchProduct.createMany({
-          data: sourceProducts.map(({ productId, cost, salePrice, margin, stockMinimum, enabled }) => ({
-            branchId: branch.id,
-            productId,
-            cost,
-            salePrice,
-            margin,
-            stockMinimum,
-            enabled,
-          })),
+          data: sourceProducts.map(
+            ({
+              productId,
+              cost,
+              salePrice,
+              margin,
+              stockMinimum,
+              enabled,
+              posFavorite,
+              allowManualPrice,
+              location,
+              shelf,
+              internalNotes,
+            }) => ({
+              branchId: branch.id,
+              productId,
+              cost,
+              salePrice,
+              margin,
+              stockMinimum,
+              enabled,
+              posFavorite,
+              allowManualPrice,
+              location,
+              shelf,
+              internalNotes,
+            }),
+          ),
         });
       }
       return branch;

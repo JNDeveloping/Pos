@@ -5,13 +5,15 @@ import { deviceConfig, saveDeviceConfig, type DeviceConfig } from '../offline/db
 import { offlineDb } from '../offline/db/database';
 import { connectivityService } from '../offline/connectivity/connectivity.service';
 import { syncService } from '../offline/sync/sync.service';
+import type { SyncState } from '../offline/sync/sync.service';
 type Branch = { id: string; name: string };
 type Stats = Awaited<ReturnType<typeof syncService.storage>>;
 export function Diagnostics() {
   const [device, setDevice] = useState<DeviceConfig>(),
     [branches, setBranches] = useState<Branch[]>([]),
     [stats, setStats] = useState<Stats>(),
-    [message, setMessage] = useState('');
+    [message, setMessage] = useState(''),
+    [sync, setSync] = useState<SyncState>();
   const load = async () => {
     setDevice(await deviceConfig());
     setStats(await syncService.storage());
@@ -23,6 +25,7 @@ export function Diagnostics() {
   };
   useEffect(() => {
     void load();
+    return syncService.subscribe(setSync);
   }, []);
   useEffect(() => {
     if (!device || branches.length !== 1 || device.branchId === branches[0].id) return;
@@ -41,6 +44,15 @@ export function Diagnostics() {
             <HardDrive className="text-brand-600" />
             <h2 className="text-lg font-bold">Dispositivo</h2>
           </div>
+          <p className="mt-4">
+            <span className="badge">
+              {sync?.status === 'SYNCING'
+                ? 'PREPARANDO'
+                : (stats?.products ?? 0) > 0 && sync?.lastSuccessfulSync
+                  ? 'LISTO'
+                  : 'NO PREPARADO'}
+            </span>
+          </p>
           <dl className="mt-5 grid gap-3 text-sm">
             <div>
               <dt className="text-slate-500">Device ID</dt>
@@ -89,6 +101,17 @@ export function Diagnostics() {
             <Save size={17} />
             Guardar vínculo
           </button>
+          <button
+            className="btn-secondary mt-3"
+            onClick={async () => {
+              setMessage('Preparando dispositivo para uso offline…');
+              await syncService.rebuild();
+              await load();
+              setMessage('Dispositivo preparado para uso offline.');
+            }}
+          >
+            <RefreshCw size={17} /> Preparar dispositivo para uso offline
+          </button>
         </article>
         <article className="card p-6">
           <div className="flex items-center gap-3">
@@ -109,6 +132,29 @@ export function Diagnostics() {
           <p className="mt-4 text-sm text-slate-500">
             Uso estimado: {((stats?.usage ?? 0) / 1024 / 1024).toFixed(2)} MB
           </p>
+          <dl className="mt-4 grid gap-2 text-sm">
+            <div>
+              <dt className="text-slate-500">API</dt>
+              <dd>{['ONLINE', 'SYNCING'].includes(sync?.status ?? '') ? 'Disponible' : 'No disponible'}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Última sincronización</dt>
+              <dd>{sync?.lastSuccessfulSync ? new Date(sync.lastSuccessfulSync).toLocaleString('es-AR') : 'Nunca'}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Operaciones pendientes</dt>
+              <dd>{sync?.pending ?? 0}</dd>
+            </div>
+          </dl>
+          <button
+            className="btn mt-5"
+            onClick={async () => {
+              await syncService.sync();
+              await load();
+            }}
+          >
+            <RefreshCw size={17} /> Sincronizar ahora
+          </button>
           <button
             className="btn-secondary mt-5"
             onClick={async () => {
