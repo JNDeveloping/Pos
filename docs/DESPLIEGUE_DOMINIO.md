@@ -32,14 +32,69 @@ sudo rsync -a --delete apps/admin/dist/ /var/www/grupolosnietos/pos/
 Si el repositorio completo ya está instalado en `/var/www/grupolosnietos/pos`, Apache puede publicar directamente
 `/var/www/grupolosnietos/pos/apps/admin/dist` y no es necesario copiar el build a otra carpeta.
 
-Ejecutar la API con systemd, PM2 o Docker en el puerto 3002. Se incluye una unidad base en
-`infra/systemd/rincon-pos-api.service`; al usarla, el repositorio y `.env` deben estar en `/opt/rincon-pos`:
+## API permanente como servicio systemd
+
+La API debe ejecutarse con systemd en el puerto 3002; no se debe dejar abierta mediante `npm run dev`, `screen` o
+una terminal SSH. La unidad incluida usa el repositorio que ya está en `/var/www/grupolosnietos/pos` y carga las
+variables desde `/var/www/grupolosnietos/pos/.env`.
+
+Primero preparar una versión de producción y comprobar dónde está Node:
+
+```bash
+cd /var/www/grupolosnietos/pos
+command -v node
+npm ci
+npm run prisma:generate
+npm run db:deploy
+npm run build
+sudo chown root:www-data .env
+sudo chmod 640 .env
+sudo chmod -R a+rX apps/api/dist node_modules
+```
+
+La unidad busca `node` en `/usr/local/bin`, `/usr/bin` y `/bin`. Si `command -v node` devuelve otra ruta —por ejemplo,
+una instalación privada de NVM— conviene instalar Node 22 globalmente para el servidor o agregar esa ruta al `PATH`
+de la unidad. No se utiliza `npm start` dentro del servicio: systemd ejecuta directamente el JavaScript compilado y
+las variables ya provienen de `EnvironmentFile`.
+
+Instalar y arrancar el servicio:
 
 ```bash
 sudo cp infra/systemd/rincon-pos-api.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now rincon-pos-api
 sudo systemctl status rincon-pos-api
+```
+
+`enable` hace que arranque automáticamente después de reiniciar el VPS. `Restart=on-failure` lo reinicia si Node
+termina por un error, pero permite detenerlo deliberadamente con `systemctl stop`.
+
+Ver logs y comprobar salud:
+
+```bash
+sudo journalctl -u rincon-pos-api -f
+curl -fsS http://127.0.0.1:3002/api/health
+curl -fsS https://grupolosnietos.com.ar/pos/api/health
+```
+
+Para publicar una actualización:
+
+```bash
+cd /var/www/grupolosnietos/pos
+git pull
+npm ci
+npm run prisma:generate
+npm run db:deploy
+npm run build
+sudo systemctl restart rincon-pos-api
+sudo systemctl status rincon-pos-api --no-pager
+```
+
+Si el servicio no inicia, obtener el motivo sin ocultarlo:
+
+```bash
+sudo systemctl reset-failed rincon-pos-api
+sudo journalctl -u rincon-pos-api -n 100 --no-pager
 ```
 
 Si se utiliza Docker Compose, el servicio configura

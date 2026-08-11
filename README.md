@@ -78,6 +78,11 @@ El despliegue solicitado utiliza `https://grupolosnietos.com.ar/pos/`, proxy de 
 [`Nginx`](infra/nginx/grupolosnietos-pos.conf) y
 [`Apache VirtualHost`](infra/apache/grupolosnietos-pos.conf).
 
+Para mantener NestJS ejecutándose después de cerrar SSH y reiniciarlo automáticamente ante fallos o reinicios del
+VPS, instalar la unidad [`rincon-pos-api.service`](infra/systemd/rincon-pos-api.service). Los comandos completos de
+instalación, logs y actualización están en la sección **API permanente como servicio systemd** de la guía de
+despliegue.
+
 ## PWA y funcionamiento offline
 
 Tras el primer login online, `SyncService` descarga el catálogo a IndexedDB. El shell abre sin red mediante Service Worker y las pantallas preparadas leen datos locales. Configuración muestra Device ID, vínculo de sucursal, uso local y reconstrucción segura. Los endpoints son `GET /api/health`, `GET /api/sync/changes?cursor=...&branchId=...` y `POST /api/sync/operations`. La estrategia detallada está en `docs/OFFLINE_FIRST.md`.
