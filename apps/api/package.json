@@ -3,7 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
+    "predev": "node ../../scripts/clean-legacy-offline.mjs && node ../../scripts/assert-release.mjs",
     "dev": "dotenv -e ../../.env -- nest start --watch",
+    "prebuild": "node ../../scripts/clean-legacy-offline.mjs && node ../../scripts/assert-release.mjs",
     "build": "dotenv -e ../../.env -- nest build",
     "start": "dotenv -e ../../.env -- node dist/src/main.js",
     "lint": "eslint \"{src,prisma}/**/*.ts\"",

@@ -89,3 +89,16 @@ La aplicación continúa siendo instalable y el Service Worker controla exclusiv
 ## Catálogo comercial (Mensaje 3)
 
 Productos avanzados, barcodes tipados, subcategorías, configuración por sucursal, precios, costos, actualizaciones masivas con preview, lista MINORISTA, etiquetas imprimibles y auditoría están documentados en `docs/MENSAJE_3.md`. Aplicar `npm run db:deploy` antes de reiniciar la API.
+
+## Actualización de un despliegue existente
+
+Si los archivos se copian encima de una versión anterior, pueden quedar directorios que ya no pertenecen al proyecto (por ejemplo `apps/admin/src/offline` o `apps/api/src/modules/sync`). El build ejecuta una limpieza preventiva, pero en producción se recomienda:
+
+```bash
+cd /var/www/grupolosnietos/pos
+bash infra/scripts/deploy-production.sh
+sudo systemctl restart rincon-pos-api
+sudo systemctl status rincon-pos-api --no-pager
+```
+
+El script exige Node.js 20.19 o superior, usa `npm ci`, elimina únicamente las fuentes offline retiradas, verifica que exista la migración del Mensaje 3, aplica Prisma y recién entonces compila. El archivo `.env` no se elimina.

@@ -9,18 +9,23 @@
   "scripts": {
     "dev:api": "npm run dev -w @rincon/api",
     "dev:admin": "npm run dev -w @rincon/admin",
+    "clean:legacy": "node scripts/clean-legacy-offline.mjs",
+    "check:release": "node scripts/assert-release.mjs",
+    "prebuild": "npm run clean:legacy && npm run check:release",
     "build": "npm run build --workspaces --if-present",
     "lint": "eslint .",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "preprisma:generate": "npm run clean:legacy && npm run check:release",
     "prisma:generate": "npm run prisma:generate -w @rincon/api",
     "db:migrate": "npm run db:migrate -w @rincon/api",
+    "predb:deploy": "npm run clean:legacy && npm run check:release",
     "db:deploy": "npm run db:deploy -w @rincon/api",
     "db:seed": "npm run db:seed -w @rincon/api",
     "format": "prettier --write ."
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=20.19"
   },
   "devDependencies": {
     "@eslint/js": "^9.34.0",
