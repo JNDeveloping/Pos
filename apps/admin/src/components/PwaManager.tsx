@@ -56,7 +56,7 @@ export function PwaManager() {
         </>
       ) : (
         <>
-          <span>Dispositivo preparado para trabajar sin conexión.</span>
+          <span>La aplicación quedó instalada. Los datos requieren conexión con el servidor.</span>
           <button aria-label="Cerrar" onClick={() => setOfflineReady(false)}>
             <X />
           </button>

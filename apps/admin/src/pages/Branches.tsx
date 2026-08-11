@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Building2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
-import { branchRepository } from '../offline/repositories/domain.repositories';
 
 export type Branch = {
   id: string;
@@ -39,11 +38,10 @@ export function Branches() {
   const [created, setCreated] = useState<Branch>();
   const [error, setError] = useState('');
   const load = async () => {
-    setBranches((await branchRepository.local()) as Branch[]);
     try {
-      setBranches((await branchRepository.refresh()) as Branch[]);
-    } catch {
-      /* Keep local branches. */
+      setBranches(await api<Branch[]>('/branches'));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudieron cargar las sucursales');
     }
   };
 
@@ -87,6 +85,7 @@ export function Branches() {
           <b>{created.name}</b> fue creada correctamente. Ya puede configurarse y vincularse a dispositivos.
         </p>
       )}
+      {error && <p className="mt-5 rounded-xl bg-amber-50 p-4 text-amber-800">{error}</p>}
 
       <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {branches.map((branch) => (

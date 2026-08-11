@@ -4,7 +4,7 @@
 
 Monorepo TypeScript con API NestJS modular, PostgreSQL como fuente central, Redis para caché/colas y una SPA React. El límite de tenant es `companyId`; los recursos operativos agregan `branchId`. Los permisos se evalúan en backend y la asignación opcional de sucursal limita al encargado/cajero.
 
-La interfaz única es una PWA React. IndexedDB conserva catálogos y una cola outbox con UUID; el servidor registra operaciones idempotentes y PostgreSQL permanece como autoridad central. El POS futuro reutilizará esta misma PWA y nunca dependerá de una aplicación Electron o nativa.
+La interfaz única es una PWA React en modo online. La API y PostgreSQL central son la única fuente de verdad; el Service Worker sólo conserva el shell y nunca respuestas comerciales. La continuidad futura se resolverá mediante API y PostgreSQL locales por sucursal, no mediante IndexedDB en el navegador.
 
 ## Estructura
 
@@ -17,7 +17,7 @@ docs/        decisiones y plan
 
 ## Decisiones
 
-- UUID desde la aplicación para soportar creación offline futura.
+- UUID como identidad distribuida para soportar sincronización futura entre servidores.
 - Dinero con `Decimal(14,2)`, nunca `number` como autoridad de cálculo.
 - UTC en persistencia y `America/Argentina/Buenos_Aires` en presentación.
 - Soft delete y filtros explícitos en entidades maestras.
@@ -46,13 +46,13 @@ sucursal no comercializa ese artículo.
 La importación Excel detecta `Codigo`, `Descripcion` y `Rubro`, procesa lotes de hasta 500 filas y puede limitarse al
 catálogo o crear el surtido de la sucursal actual con valores comerciales en cero. Los códigos numéricos no EAN-13
 se admiten con advertencia. Las categorías se normalizan antes del alta para evitar variantes por mayúsculas o
-acentos. PostgreSQL continúa imponiendo la unicidad de códigos y la PWA conserva `BranchProduct` en IndexedDB.
+acentos. PostgreSQL continúa imponiendo la unicidad de códigos y preserva `BranchProduct` como configuración comercial.
 
 ## Entrega incremental
 
 1. **Núcleo:** identidad/RBAC, empresa, sucursales, categorías, marcas, productos y configuración por sucursal.
 2. **Operación:** terminal, caja, venta/pagos, stock y movimientos transaccionales.
-3. **Continuidad operativa:** ampliar la PWA/IndexedDB con ventas, caja, impresión web, idempotencia y conflictos.
+3. **Continuidad operativa final:** servidor API/PostgreSQL local por sucursal, idempotencia y sincronización con nube.
 4. **Abastecimiento:** proveedores, compras, transferencias, inventario, lotes y mermas.
 5. **Comercial:** promociones, clientes, crédito, fidelización y devoluciones.
 6. **Control:** reportes, alertas, auditoría y cartelería.

@@ -27,7 +27,7 @@ export default defineConfig(({ mode }) => {
         manifest: {
           name: 'El Rincón de los Nietos',
           short_name: 'El Rincón POS',
-          description: 'Administración y punto de venta offline-first',
+          description: 'Administración web de El Rincón de los Nietos',
           theme_color: '#125633',
           background_color: '#effbf3',
           display: 'standalone',
@@ -47,8 +47,8 @@ export default defineConfig(({ mode }) => {
           clientsClaim: false,
           skipWaiting: false,
           runtimeCaching: [],
-          // API responses deliberately never enter Cache Storage. Domain data lives
-          // in IndexedDB and is updated only by SyncService.
+          // El Service Worker conserva solamente el shell. Las respuestas /api nunca
+          // ingresan a Cache Storage y PostgreSQL continúa como única fuente de verdad.
         },
         devOptions: { enabled: true, type: 'module', navigateFallback: 'index.html' },
       }),

@@ -14,7 +14,6 @@ import { ProductsModule } from './modules/products/products.module';
 import { CompanyModule } from './modules/company/company.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { HealthModule } from './modules/health/health.module';
-import { SyncModule } from './modules/sync/sync.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '../../.env' }),
@@ -24,7 +23,6 @@ import { SyncModule } from './modules/sync/sync.module';
     CompanyModule,
     DashboardModule,
     HealthModule,
-    SyncModule,
     BranchesModule,
     UsersModule,
     RolesModule,

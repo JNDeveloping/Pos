@@ -1,8 +1,8 @@
 import { FormEvent, useState } from 'react';
-import { Boxes, CloudOff, LockKeyhole } from 'lucide-react';
+import { Boxes, LockKeyhole } from 'lucide-react';
 import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
-export function Login({ offlineAvailable = false }: { offlineAvailable?: boolean }) {
+export function Login() {
   const [error, setError] = useState(''),
     [loading, setLoading] = useState(false);
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -49,19 +49,8 @@ export function Login({ offlineAvailable = false }: { offlineAvailable?: boolean
             {loading ? 'Ingresando…' : 'Ingresar'}
           </button>
         </form>
-        {offlineAvailable && (
-          <button
-            className="btn-secondary mt-3 min-h-12 w-full"
-            onClick={() => {
-              navigate('/');
-            }}
-          >
-            <CloudOff size={18} />
-            Continuar con sesión offline limitada
-          </button>
-        )}
         <p className="mt-5 text-center text-xs text-slate-400">
-          El primer ingreso en cada dispositivo requiere conexión.
+          El sistema requiere conexión con el servidor para operar.
         </p>
       </section>
     </main>

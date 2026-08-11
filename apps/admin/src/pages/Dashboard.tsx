@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { Building2, FolderTree, Package, PackageCheck, Tags, Users } from 'lucide-react';
 import { api } from '../lib/api';
-import { offlineDb } from '../offline/db/database';
-import { deviceConfig } from '../offline/db/device';
+import { branchContext } from '../lib/branch-context';
 type S = {
   products: number;
   activeProducts: number;
@@ -16,31 +15,14 @@ type S = {
 };
 export function Dashboard() {
   const [s, setS] = useState<S>();
+  const [error, setError] = useState('');
   useEffect(() => {
     async function load() {
-      const device = await deviceConfig();
-      const [products, activeProducts, activeBranches, categories] = await Promise.all([
-        offlineDb.products.count(),
-        offlineDb.products.filter((product) => product.active).count(),
-        offlineDb.branches.filter((branch) => branch.active).count(),
-        offlineDb.categories.count(),
-      ]);
-      setS({
-        products,
-        activeProducts,
-        activeBranches,
-        activeUsers: await offlineDb.usersCache.count(),
-        categories,
-        productsWithoutPrice: await offlineDb.branchProducts.filter((config) => Number(config.salePrice) === 0).count(),
-        productsWithoutBranchConfig: 0,
-        enabledInBranch: await offlineDb.branchProducts
-          .filter((config) => config.enabled && (!device.branchId || config.branchId === device.branchId))
-          .count(),
-      });
       try {
-        setS(await api<S>(`/dashboard/summary${device.branchId ? `?branchId=${device.branchId}` : ''}`));
-      } catch {
-        // Local metrics are already visible; connectivity is reported globally.
+        const branchId = branchContext.get();
+        setS(await api<S>(`/dashboard/summary${branchId ? `?branchId=${branchId}` : ''}`));
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'No se pudo cargar el resumen');
       }
     }
     void load();
@@ -60,6 +42,7 @@ export function Dashboard() {
       <p className="mt-2 text-slate-500">
         Estado actual del catálogo y la organización, sin datos ficticios de ventas.
       </p>
+      {error && <p className="mt-5 rounded-xl bg-amber-50 p-4 text-amber-800">{error}</p>}
       <section className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {cards.map(([label, value, Icon]) => (
           <article className="card p-6" key={label as string}>

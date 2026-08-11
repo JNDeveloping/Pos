@@ -48,58 +48,6 @@ model Company {
   categories     Category[]
   brands         Brand[]
   products       Product[]
-  syncChanges    SyncChange[]
-  syncOperations SyncOperation[]
-}
-
-enum SyncEntityType {
-  COMPANY
-  BRANCH
-  CATEGORY
-  BRAND
-  PRODUCT
-  PRODUCT_BARCODE
-  BRANCH_PRODUCT
-}
-
-enum SyncChangeOperation {
-  UPSERT
-  DELETE
-}
-
-model SyncChange {
-  version    BigInt              @id @default(autoincrement())
-  companyId  String              @db.Uuid
-  company    Company             @relation(fields: [companyId], references: [id])
-  branchId   String?             @db.Uuid
-  entityType SyncEntityType
-  entityId   String              @db.Uuid
-  operation  SyncChangeOperation
-  payload    Json?
-  createdAt  DateTime            @default(now())
-
-  @@index([companyId, version])
-  @@index([companyId, branchId, version])
-  @@index([companyId, entityType, entityId])
-}
-
-model SyncOperation {
-  id          String   @id @default(uuid()) @db.Uuid
-  companyId   String   @db.Uuid
-  company     Company  @relation(fields: [companyId], references: [id])
-  deviceId    String   @db.Uuid
-  operationId String   @db.Uuid
-  entityType  String
-  entityId    String   @db.Uuid
-  operation   String
-  payload     Json
-  result      Json?
-  processedAt DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@unique([companyId, operationId])
-  @@index([companyId, deviceId, createdAt])
 }
 
 model Branch {

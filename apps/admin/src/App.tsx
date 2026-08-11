@@ -3,11 +3,8 @@ import { Layout } from './components/Layout';
 import { PwaManager } from './components/PwaManager';
 import { api, type Me } from './lib/api';
 import { currentRoute } from './lib/navigation';
-import { connectivityService } from './offline/connectivity/connectivity.service';
-import { offlineDb } from './offline/db/database';
-import { deviceConfig, saveDeviceConfig } from './offline/db/device';
-import { cacheSession, offlineSession } from './offline/session/offline-session';
-import { syncService } from './offline/sync/sync.service';
+import { connectivityService } from './services/connectivity.service';
+import { branchContext } from './lib/branch-context';
 import { Dashboard } from './pages/Dashboard';
 import { Branches, type Branch } from './pages/Branches';
 import { Diagnostics } from './pages/Diagnostics';
@@ -25,6 +22,7 @@ const pages: Record<string, React.ReactNode> = {
   '/catalog': <Products mode="master" />,
   '/roles': <SimpleCrud title="Roles y permisos" path="/roles" readOnly />,
   '/settings': <Diagnostics />,
+  '/admin/diagnostics': <Diagnostics />,
 };
 export default function App() {
   const route = currentRoute();
@@ -32,55 +30,39 @@ export default function App() {
     [ready, setReady] = useState(false),
     [branches, setBranches] = useState<Branch[]>([]),
     [currentBranchId, setCurrentBranchId] = useState<string>();
-  const token = sessionStorage.getItem('accessToken');
   useEffect(() => {
     connectivityService.start();
-    void syncService.initialize();
     return () => connectivityService.stop();
   }, []);
   useEffect(() => {
     async function restore() {
-      const cached = await offlineSession();
-      if (cached) {
-        setMe(cached);
-        setReady(true);
-      }
+      const token = sessionStorage.getItem('accessToken');
       if (token) {
         try {
           const online = await api<Me>('/auth/me');
-          await cacheSession(online);
           setMe(online);
-          void syncService.sync();
-          setReady(true);
-          return;
-        } catch {
-          /* The server may be unavailable; fall through to the limited cached session. */
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('sesión expiró')) sessionStorage.clear();
         }
       }
-      if (!cached) setReady(true);
+      setReady(true);
     }
     void restore();
-  }, [token]);
+  }, []);
   useEffect(() => {
     if (!me) return;
     async function configureBranch() {
-      const apply = async (available: Branch[]) => {
+      const apply = (available: Branch[]) => {
         setBranches(available);
-        const device = await deviceConfig();
-        const selected = available.find((branch) => branch.id === device.branchId)?.id;
+        const selected = available.find((branch) => branch.id === branchContext.get())?.id;
         const nextBranchId = available.length === 1 ? available[0].id : selected;
         setCurrentBranchId(nextBranchId);
-        if (nextBranchId !== device.branchId) {
-          await saveDeviceConfig({ ...device, branchId: nextBranchId });
-          if (connectivityService.current === 'ONLINE') void syncService.rebuild();
-        }
+        branchContext.set(nextBranchId);
       };
-      const local = (await offlineDb.branches.toArray()).filter((branch) => branch.active) as Branch[];
-      if (local.length) await apply(local);
       try {
-        await apply((await api<Branch[]>('/branches')).filter((branch) => branch.active));
+        apply((await api<Branch[]>('/branches')).filter((branch) => branch.active));
       } catch {
-        // The local branch context was already applied; a network error must not block startup.
+        // The global connection indicator explains the temporary API outage.
       }
     }
     void configureBranch();
@@ -90,7 +72,7 @@ export default function App() {
   if (!me || route === '/login')
     return (
       <>
-        <Login offlineAvailable={Boolean(me)} />
+        <Login />
         <PwaManager />
       </>
     );
@@ -107,10 +89,8 @@ export default function App() {
         branches={branches}
         currentBranchId={currentBranchId}
         onBranchChange={async (branchId) => {
-          const device = await deviceConfig();
-          await saveDeviceConfig({ ...device, branchId });
+          branchContext.set(branchId);
           setCurrentBranchId(branchId);
-          if (connectivityService.current === 'ONLINE') await syncService.rebuild();
         }}
       >
         {page}

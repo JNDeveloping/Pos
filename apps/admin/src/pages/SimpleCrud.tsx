@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
-import { brandRepository, categoryRepository } from '../offline/repositories/domain.repositories';
 type Item = { id: string; name: string; code?: string; active: boolean };
 export function SimpleCrud({
   title,
@@ -17,15 +16,14 @@ export function SimpleCrud({
   const [items, setItems] = useState<Item[]>([]),
     [name, setName] = useState(''),
     [code, setCode] = useState('');
-  const repository = path === '/categories' ? categoryRepository : path === '/brands' ? brandRepository : undefined;
   const load = async () => {
-    if (repository) setItems((await repository.local()) as Item[]);
     try {
       setItems(await api<Item[]>(path));
-    } catch {
-      /* Local data remains visible offline. */
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los datos');
     }
   };
+  const [error, setError] = useState('');
   useEffect(() => {
     void load();
   }, [path]);
@@ -54,6 +52,7 @@ export function SimpleCrud({
           </button>
         </form>
       )}
+      {error && <p className="mt-4 rounded-xl bg-amber-50 p-4 text-amber-800">{error}</p>}
       <div className="card mt-5 overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="border-b bg-slate-50 text-xs uppercase text-slate-500">

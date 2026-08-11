@@ -1,6 +1,6 @@
 # El Rincón de los Nietos — Etapa 1
 
-Monorepo funcional para la administración central multiempresa y multisucursal. Esta entrega contiene exclusivamente el núcleo solicitado: identidad/RBAC, empresa, sucursales, usuarios, categorías, marcas, productos, códigos de barra, precios/costos por sucursal e historiales automáticos. Incluye PWA e infraestructura offline de catálogos, pero **no incluye ventas, caja ni stock operativo**.
+Monorepo funcional para la administración central multiempresa y multisucursal. Esta entrega contiene exclusivamente el núcleo solicitado: identidad/RBAC, empresa, sucursales, usuarios, categorías, marcas, productos, códigos de barra, precios/costos por sucursal e historiales automáticos. La PWA opera temporalmente 100% online y **no incluye ventas, caja ni stock operativo**.
 
 ## Estructura
 
@@ -40,7 +40,6 @@ Para validar el flujo PWA real se debe compilar y servir el resultado (los Servi
 ```bash
 npm run build -w @rincon/admin
 npm run preview -w @rincon/admin -- --host 0.0.0.0
-npm run test:offline -w @rincon/admin
 ```
 
 ## Calidad
@@ -83,6 +82,6 @@ VPS, instalar la unidad [`rincon-pos-api.service`](infra/systemd/rincon-pos-api.
 instalación, logs y actualización están en la sección **API permanente como servicio systemd** de la guía de
 despliegue.
 
-## PWA y funcionamiento offline
+## PWA online
 
-Tras el primer login online, `SyncService` descarga el catálogo a IndexedDB. El shell abre sin red mediante Service Worker y las pantallas preparadas leen datos locales. Configuración muestra Device ID, vínculo de sucursal, uso local y reconstrucción segura. Los endpoints son `GET /api/health`, `GET /api/sync/changes?cursor=...&branchId=...` y `POST /api/sync/operations`. La estrategia detallada está en `docs/OFFLINE_FIRST.md`.
+La aplicación continúa siendo instalable y el Service Worker controla exclusivamente `/pos/`. Sólo precachea el shell y los assets versionados: nunca almacena respuestas de `/api/`. Durante esta fase PostgreSQL, mediante la API, es la única fuente de verdad. IndexedDB, la cola del navegador y los endpoints de sincronización fueron retirados. La continuidad offline futura se resolverá con un servidor PostgreSQL local por sucursal, según `docs/OFFLINE_FIRST.md`.

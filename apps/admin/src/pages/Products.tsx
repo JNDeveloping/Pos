@@ -1,13 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileSpreadsheet, PackagePlus, Search, X } from 'lucide-react';
 import { api } from '../lib/api';
-import { deviceConfig } from '../offline/db/device';
-import {
-  brandRepository,
-  branchRepository,
-  categoryRepository,
-  productRepository,
-} from '../offline/repositories/domain.repositories';
+import { branchContext } from '../lib/branch-context';
 type Ref = { id: string; name: string };
 type Config = {
   id: string;
@@ -43,14 +37,11 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     [enableDuringImport, setEnableDuringImport] = useState(mode === 'branch'),
     [importing, setImporting] = useState(''),
     [refreshing, setRefreshing] = useState(false),
-    [localOnly, setLocalOnly] = useState(false);
+    [loadError, setLoadError] = useState('');
   const [dirty, setDirty] = useState(false);
   const load = async () => {
-    const enabled = enabledFilter === 'all' ? undefined : enabledFilter === 'true';
-    const local = (await productRepository.searchLocal(search, branchId, enabled, page, 20)) as unknown as Page;
-    setResult(local);
-    setLocalOnly(false);
     setRefreshing(true);
+    setLoadError('');
     try {
       const params = new URLSearchParams({ search, page: String(page), limit: '20' });
       if (branchId && enabledFilter !== 'all') {
@@ -58,8 +49,8 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         params.set('enabled', enabledFilter);
       }
       setResult(await api<Page>(`/products?${params}`));
-    } catch {
-      setLocalOnly(true);
+    } catch (cause) {
+      setLoadError(cause instanceof Error ? cause.message : 'No se pudieron cargar los productos');
     } finally {
       setRefreshing(false);
     }
@@ -68,19 +59,15 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     void load();
   }, [page, branchId, enabledFilter, mode]);
   useEffect(() => {
-    Promise.all([categoryRepository.local(), brandRepository.local(), branchRepository.local()]).then(([c, b, br]) => {
-      setCategories(c);
-      setBrands(b);
-      setBranches(br);
-    });
-    Promise.all([categoryRepository.refresh(), brandRepository.refresh(), branchRepository.refresh()])
+    Promise.all([api<Ref[]>('/categories'), api<Ref[]>('/brands'), api<Ref[]>('/branches')])
       .then(([c, b, br]) => {
         setCategories(c);
         setBrands(b);
         setBranches(br);
+        const selected = branchContext.get();
+        setBranchId(br.length === 1 ? br[0].id : selected);
       })
-      .catch(() => undefined);
-    void deviceConfig().then((device) => setBranchId(device.branchId));
+      .catch((cause) => setLoadError(cause instanceof Error ? cause.message : 'No se cargaron las referencias'));
   }, []);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
@@ -226,12 +213,12 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         </div>
       </div>
       {importing && <p className="mt-4 rounded-xl bg-brand-50 p-4 text-sm text-brand-800">{importing}</p>}
-      {localOnly && (
+      {loadError && (
         <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">
-          Sin conexión. Mostrando datos guardados en este dispositivo.
+          {loadError}
         </p>
       )}
-      {refreshing && <p className="mt-3 text-sm text-slate-500">Actualizando en segundo plano…</p>}
+      {refreshing && <p className="mt-3 text-sm text-slate-500">Cargando desde el servidor…</p>}
       <label className="mt-4 flex min-h-11 items-center gap-3 text-sm font-medium">
         <input
           type="checkbox"

@@ -67,7 +67,7 @@ function refreshAccessToken() {
 async function performRefresh() {
   const refreshToken = sessionStorage.getItem('refreshToken');
   if (!refreshToken)
-    throw new Error('La sesión online expiró. Podés continuar offline si este dispositivo está preparado.');
+    throw new Error('La sesión expiró. Volvé a ingresar.');
   const response = await fetch(`${API}/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

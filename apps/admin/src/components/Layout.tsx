@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import type { Me } from '../lib/api';
 import { can } from '../lib/api';
-import { SyncIndicator } from './SyncIndicator';
+import { ConnectionStatus } from './ConnectionStatus';
 import type { Branch } from '../pages/Branches';
 import { appPath, currentRoute, navigate } from '../lib/navigation';
 const items = [
@@ -106,7 +106,7 @@ export function Layout({
             {collapsed ? <Menu /> : <ChevronLeft className="hidden lg:block" />}
             <Menu className="lg:hidden" />
           </button>
-          <SyncIndicator />
+          <ConnectionStatus />
           <div className="hidden text-right md:block">
             <b>
               {me.user.firstName} {me.user.lastName}
