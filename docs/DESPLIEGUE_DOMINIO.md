@@ -49,6 +49,7 @@ npm run db:deploy
 npm run build
 sudo chown root:www-data .env
 sudo chmod 640 .env
+chmod +x infra/scripts/check-api-service.sh
 sudo chmod -R a+rX apps/api/dist node_modules
 ```
 
@@ -96,6 +97,52 @@ Si el servicio no inicia, obtener el motivo sin ocultarlo:
 sudo systemctl reset-failed rincon-pos-api
 sudo journalctl -u rincon-pos-api -n 100 --no-pager
 ```
+
+### `Failed to load environment files` / resultado `resources`
+
+Ese mensaje aparece antes de iniciar Node y normalmente significa que el `.env` configurado en la unidad no existe,
+no es legible o la unidad instalada todavía apunta a otra ruta. `.env` no se descarga con `git pull` porque está
+ignorado deliberadamente; debe crearse en cada servidor.
+
+Ejecutar estas comprobaciones en el VPS:
+
+```bash
+sudo systemctl cat rincon-pos-api
+sudo ls -la /var/www/grupolosnietos/pos/.env
+sudo -u www-data test -r /var/www/grupolosnietos/pos/.env && echo "env legible"
+sudo -u www-data /var/www/grupolosnietos/pos/infra/scripts/check-api-service.sh
+```
+
+Si el archivo no existe:
+
+```bash
+cd /var/www/grupolosnietos/pos
+sudo cp .env.example .env
+sudo nano .env
+sudo chown root:www-data .env
+sudo chmod 640 .env
+```
+
+No dejar los secretos de ejemplo: configurar `DATABASE_URL`, `REDIS_URL`, dos secretos JWT diferentes y robustos,
+`PORT=3002`, `HOST=127.0.0.1` y `CORS_ORIGIN=https://grupolosnietos.com.ar`.
+
+Finalmente reinstalar la unidad actualizada —editar solamente el archivo del repositorio no modifica la copia de
+`/etc/systemd/system`— y arrancar:
+
+```bash
+cd /var/www/grupolosnietos/pos
+chmod +x infra/scripts/check-api-service.sh
+sudo cp infra/systemd/rincon-pos-api.service /etc/systemd/system/rincon-pos-api.service
+sudo systemctl daemon-reload
+sudo systemctl reset-failed rincon-pos-api
+sudo systemctl restart rincon-pos-api
+sudo systemctl status rincon-pos-api --no-pager -l
+sudo journalctl -u rincon-pos-api -n 100 --no-pager -o cat
+```
+
+La unidad marca `EnvironmentFile` como opcional sólo durante el parseo para que el preflight pueda imprimir el
+motivo preciso. El script sigue rechazando el arranque si `.env` falta, no es legible o no contiene variables
+obligatorias; no se inicia la API con una configuración incompleta.
 
 Si se utiliza Docker Compose, el servicio configura
 `HOST=0.0.0.0` dentro del contenedor, pero publica el puerto únicamente sobre `127.0.0.1` del VPS.
