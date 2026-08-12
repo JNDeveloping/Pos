@@ -1,6 +1,16 @@
 import { ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Module, NotFoundException, Param, Patch, Post } from '@nestjs/common';
-import { IsBoolean, IsEmail, IsEnum, IsIn, IsNumberString, IsOptional, IsString, IsUUID, Length } from 'class-validator';
+import {
+  IsBoolean,
+  IsEmail,
+  IsEnum,
+  IsIn,
+  IsNumberString,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+} from 'class-validator';
 import { Prisma, RoundingMode } from '@prisma/client';
 import { CurrentSession, RequirePermissions, Session } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
@@ -42,6 +52,10 @@ class BranchDto {
   @IsOptional() @IsBoolean() ticketShowCashier?: boolean;
   @IsOptional() @IsBoolean() ticketShowSaleCode?: boolean;
   @IsOptional() @IsBoolean() active?: boolean;
+  @IsOptional() @IsBoolean() allowNegativeStock?: boolean;
+  @IsOptional() @IsBoolean() trackLots?: boolean;
+  @IsOptional() @IsBoolean() lowStockAlerts?: boolean;
+  @IsOptional() @IsBoolean() expirationAlerts?: boolean;
   @IsOptional() @IsUUID() copyFromBranchId?: string;
 }
 @ApiTags('Sucursales')
@@ -71,7 +85,13 @@ class BranchesController {
         if (!source) throw new NotFoundException('Sucursal de origen no encontrada');
       }
       const branch = await tx.branch.create({
-        data: { ...branchData, code: d.code.toUpperCase(), companyId: s.companyId, latitude: d.latitude ? new Prisma.Decimal(d.latitude) : undefined, longitude: d.longitude ? new Prisma.Decimal(d.longitude) : undefined },
+        data: {
+          ...branchData,
+          code: d.code.toUpperCase(),
+          companyId: s.companyId,
+          latitude: d.latitude ? new Prisma.Decimal(d.latitude) : undefined,
+          longitude: d.longitude ? new Prisma.Decimal(d.longitude) : undefined,
+        },
       });
       if (copyFromBranchId) {
         const sourceProducts = await tx.branchProduct.findMany({ where: { branchId: copyFromBranchId } });
@@ -106,7 +126,17 @@ class BranchesController {
           ),
         });
       }
-      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: branch.id, userId: s.sub, entityType: 'BRANCH', entityId: branch.id, action: 'BRANCH_CREATED', after: JSON.parse(JSON.stringify(branch)) } });
+      await tx.auditLog.create({
+        data: {
+          companyId: s.companyId,
+          branchId: branch.id,
+          userId: s.sub,
+          entityType: 'BRANCH',
+          entityId: branch.id,
+          action: 'BRANCH_CREATED',
+          after: JSON.parse(JSON.stringify(branch)),
+        },
+      });
       return branch;
     });
   }
@@ -121,8 +151,27 @@ class BranchesController {
     const before = await this.db.branch.findFirst({ where: { id, companyId: s.companyId, deletedAt: null } });
     if (!before) throw new NotFoundException('Sucursal no encontrada');
     return this.db.$transaction(async (tx) => {
-      const branch = await tx.branch.update({ where: { id, companyId: s.companyId }, data: { ...branchData, code: d.code?.toUpperCase(), latitude: d.latitude ? new Prisma.Decimal(d.latitude) : undefined, longitude: d.longitude ? new Prisma.Decimal(d.longitude) : undefined } });
-      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: id, userId: s.sub, entityType: 'BRANCH', entityId: id, action: 'BRANCH_UPDATED', before: JSON.parse(JSON.stringify(before)), after: JSON.parse(JSON.stringify(branch)) } });
+      const branch = await tx.branch.update({
+        where: { id, companyId: s.companyId },
+        data: {
+          ...branchData,
+          code: d.code?.toUpperCase(),
+          latitude: d.latitude ? new Prisma.Decimal(d.latitude) : undefined,
+          longitude: d.longitude ? new Prisma.Decimal(d.longitude) : undefined,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          companyId: s.companyId,
+          branchId: id,
+          userId: s.sub,
+          entityType: 'BRANCH',
+          entityId: id,
+          action: 'BRANCH_UPDATED',
+          before: JSON.parse(JSON.stringify(before)),
+          after: JSON.parse(JSON.stringify(branch)),
+        },
+      });
       return branch;
     });
   }

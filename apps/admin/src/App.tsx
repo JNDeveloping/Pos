@@ -30,6 +30,8 @@ import { PurchaseOrderNew } from './pages/PurchaseOrderNew';
 import { PurchaseOrderDetail } from './pages/PurchaseOrderDetail';
 import { PurchaseDetail } from './pages/PurchaseDetail';
 import { PurchaseNew } from './pages/PurchaseNew';
+import { Stock } from './pages/Stock';
+import { StockOperations } from './pages/StockOperations';
 const pages: Record<string, React.ReactNode> = {
   '/': <Dashboard />,
   '/branches': <Branches />,
@@ -63,6 +65,12 @@ const pages: Record<string, React.ReactNode> = {
   '/admin/costs': <Commerce kind="costs" />,
   '/admin/labels': <Labels />,
   '/admin/audit': <Audit />,
+  '/admin/stock': <Stock />,
+  '/admin/stock/movements': <StockOperations kind="movements" />,
+  '/admin/inventory': <StockOperations kind="inventory" />,
+  '/admin/waste': <StockOperations kind="waste" />,
+  '/admin/expirations': <StockOperations kind="expirations" />,
+  '/admin/transfers': <StockOperations kind="transfers" />,
 };
 const routePermissions: Record<string, string> = {
   '/suppliers': 'suppliers.view',
@@ -77,6 +85,12 @@ const routePermissions: Record<string, string> = {
   '/admin/purchase-orders/new': 'purchaseOrders.create',
   '/roles': 'roles.view',
   '/admin/roles': 'roles.view',
+  '/admin/stock': 'stock.view',
+  '/admin/stock/movements': 'stock.movements',
+  '/admin/inventory': 'inventory.view',
+  '/admin/waste': 'waste.view',
+  '/admin/expirations': 'expirations.view',
+  '/admin/transfers': 'transfers.view',
 };
 export default function App() {
   const route = currentRoute();

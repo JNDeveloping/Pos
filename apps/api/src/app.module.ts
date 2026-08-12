@@ -18,6 +18,7 @@ import { CommercialModule } from './modules/commercial/commercial.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { PurchasesModule } from './modules/purchases/purchases.module';
+import { StockModule } from './modules/stock/stock.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '../../.env' }),
@@ -37,6 +38,7 @@ import { PurchasesModule } from './modules/purchases/purchases.module';
     AuditModule,
     SuppliersModule,
     PurchasesModule,
+    StockModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })

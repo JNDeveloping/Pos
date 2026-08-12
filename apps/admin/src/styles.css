@@ -139,6 +139,33 @@
   .skeleton {
     @apply animate-pulse rounded-lg bg-slate-200;
   }
+  .toolbar {
+    @apply flex flex-col gap-3 border-b p-4 sm:flex-row;
+  }
+  .search-field {
+    @apply flex min-w-0 flex-1 items-center gap-2 rounded-lg border bg-white px-3 text-slate-500;
+  }
+  .search-field input {
+    @apply min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none outline-none;
+  }
+  .empty-state {
+    @apply grid min-h-56 place-items-center gap-2 p-8 text-center text-slate-500;
+  }
+  .empty-state h2 {
+    @apply text-xl font-bold text-slate-800;
+  }
+  .badge-warning {
+    @apply bg-amber-50 text-amber-800;
+  }
+  .modal-backdrop {
+    @apply fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4 backdrop-blur-sm;
+  }
+  .modal-card {
+    @apply grid w-full max-w-lg gap-4 rounded-2xl bg-white p-6 shadow-2xl;
+  }
+  .modal-card label {
+    @apply grid gap-1.5 text-sm font-semibold text-slate-700;
+  }
 }
 @media (max-width: 639px) {
   .page-content {

@@ -82,6 +82,28 @@ const modules: Record<string, string[]> = {
     'stock.view|Ver stock',
     'stock.adjust|Ajustar stock',
   ],
+  STOCK: [
+    'stock.movements|Ver movimientos de stock',
+    'stock.history|Ver historial de stock',
+    'stock.initialLoad|Cargar stock inicial',
+    'stock.transfer|Transferir stock (compatibilidad)',
+    'stock.inventory|Administrar inventarios (compatibilidad)',
+    'stock.waste|Registrar mermas (compatibilidad)',
+  ],
+  INVENTORY: [
+    'inventory.view|Ver inventarios',
+    'inventory.create|Crear inventarios',
+    'inventory.count|Contar inventario',
+    'inventory.confirm|Confirmar inventarios',
+  ],
+  WASTE: ['waste.view|Ver mermas', 'waste.create|Registrar mermas'],
+  EXPIRATIONS: ['expirations.view|Ver vencimientos'],
+  TRANSFERS: [
+    'transfers.view|Ver transferencias',
+    'transfers.create|Crear transferencias',
+    'transfers.send|Enviar transferencias',
+    'transfers.receive|Recibir transferencias',
+  ],
 };
 export const SYSTEM_PERMISSIONS: PermissionDefinition[] = Object.entries(modules).flatMap(
   ([module, items], moduleIndex) =>

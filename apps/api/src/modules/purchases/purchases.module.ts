@@ -33,6 +33,7 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { StockModule, StockService } from '../stock/stock.module';
 import { CurrentSession, RequirePermissions, Session } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
 import { InvoiceAnalysisResult, InvoiceAnalysisService, ManualInvoiceAnalyzer } from './invoice-analysis.service';
@@ -93,7 +94,10 @@ class CorrectionDto {
 type UploadedInvoice = { buffer: Buffer; mimetype: string; size: number; originalname: string };
 @Injectable()
 class PurchasesService {
-  constructor(private db: PrismaService) {}
+  constructor(
+    private db: PrismaService,
+    private stock: StockService,
+  ) {}
   async context(s: Session, branchId: string, supplierId: string) {
     const [b, p] = await Promise.all([
       this.db.branch.findFirst({ where: { id: branchId, companyId: s.companyId, deletedAt: null } }),
@@ -312,7 +316,14 @@ class PurchasesService {
   }
   async confirm(s: Session, id: string, d: ConfirmDto) {
     const current = await this.get(s, id);
-    if (current.status === PurchaseStatus.CONFIRMED) throw new BadRequestException('La compra ya está confirmada');
+    if (current.status === PurchaseStatus.CONFIRMED)
+      return this.db.$transaction(
+        async (tx) => {
+          await this.stock.receivePurchaseInTransaction(tx, s, current);
+          return current;
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
     if (current.status === PurchaseStatus.CANCELLED) throw new BadRequestException('La compra está cancelada');
     return this.db.$transaction(async (tx) => {
       if (d.applyCosts)
@@ -357,6 +368,7 @@ class PurchasesService {
         where: { id },
         data: { status: PurchaseStatus.CONFIRMED, confirmedByUserId: s.sub, confirmedAt: new Date() },
       });
+      await this.stock.receivePurchaseInTransaction(tx, s, current);
       if (current.purchaseOrderId)
         await tx.purchaseOrder.update({
           where: { id: current.purchaseOrderId },
@@ -671,6 +683,7 @@ class InvoiceAnalysisController {
   }
 }
 @Module({
+  imports: [StockModule],
   controllers: [
     OrdersController,
     PurchasesController,

@@ -144,6 +144,10 @@ model Branch {
   ticketShowCashier  Boolean         @default(true)
   ticketShowSaleCode Boolean         @default(true)
   active             Boolean         @default(true)
+  allowNegativeStock Boolean         @default(false)
+  trackLots          Boolean         @default(false)
+  lowStockAlerts     Boolean         @default(true)
+  expirationAlerts   Boolean         @default(true)
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
   deletedAt          DateTime?
@@ -158,6 +162,198 @@ model Branch {
 
   @@unique([companyId, code])
   @@index([companyId, active])
+}
+
+enum StockMovementType {
+  PURCHASE_RECEIPT
+  SALE
+  SALE_RETURN
+  MANUAL_INCREASE
+  MANUAL_DECREASE
+  INVENTORY_ADJUSTMENT
+  TRANSFER_OUT
+  TRANSFER_IN
+  WASTE
+  BREAKAGE
+  EXPIRATION
+  INTERNAL_CONSUMPTION
+  INITIAL_STOCK
+  OTHER
+}
+
+enum InventoryType {
+  FULL
+  CATEGORY
+  SELECTED_PRODUCTS
+  SECTOR
+}
+
+enum InventoryStatus {
+  DRAFT
+  IN_PROGRESS
+  REVIEW
+  CONFIRMED
+  CANCELLED
+}
+
+enum WasteType {
+  BREAKAGE
+  EXPIRATION
+  THEFT
+  INTERNAL_CONSUMPTION
+  DAMAGED
+  OTHER
+}
+
+enum StockTransferStatus {
+  DRAFT
+  REQUESTED
+  PREPARING
+  IN_TRANSIT
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+model Stock {
+  id                String   @id @default(uuid()) @db.Uuid
+  companyId         String   @db.Uuid
+  branchId          String   @db.Uuid
+  productId         String   @db.Uuid
+  quantity          Decimal  @default(0) @db.Decimal(14, 3)
+  reservedQuantity  Decimal  @default(0) @db.Decimal(14, 3)
+  inTransitQuantity Decimal  @default(0) @db.Decimal(14, 3)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([branchId, productId])
+  @@index([companyId, branchId])
+  @@index([productId])
+}
+
+model StockMovement {
+  id               String            @id @default(uuid()) @db.Uuid
+  companyId        String            @db.Uuid
+  branchId         String            @db.Uuid
+  productId        String            @db.Uuid
+  type             StockMovementType
+  quantity         Decimal           @db.Decimal(14, 3)
+  previousQuantity Decimal           @db.Decimal(14, 3)
+  newQuantity      Decimal           @db.Decimal(14, 3)
+  referenceType    String?
+  referenceId      String?           @db.Uuid
+  reason           String?
+  userId           String            @db.Uuid
+  metadata         Json?
+  createdAt        DateTime          @default(now())
+
+  @@unique([companyId, referenceType, referenceId, productId, type])
+  @@index([branchId, productId, createdAt])
+  @@index([companyId, type, createdAt])
+  @@index([referenceId])
+}
+
+model StockLot {
+  id             String    @id @default(uuid()) @db.Uuid
+  companyId      String    @db.Uuid
+  branchId       String    @db.Uuid
+  productId      String    @db.Uuid
+  lotNumber      String?
+  expirationDate DateTime?
+  quantity       Decimal   @db.Decimal(14, 3)
+  purchaseId     String?   @db.Uuid
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([branchId, productId])
+  @@index([expirationDate])
+}
+
+model Inventory {
+  id                String          @id @default(uuid()) @db.Uuid
+  companyId         String          @db.Uuid
+  branchId          String          @db.Uuid
+  name              String
+  type              InventoryType
+  status            InventoryStatus @default(DRAFT)
+  categoryId        String?         @db.Uuid
+  sector            String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdByUserId   String          @db.Uuid
+  confirmedByUserId String?         @db.Uuid
+  notes             String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  items             InventoryItem[]
+
+  @@index([companyId, branchId, status])
+}
+
+model InventoryItem {
+  id              String    @id @default(uuid()) @db.Uuid
+  inventoryId     String    @db.Uuid
+  inventory       Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  productId       String    @db.Uuid
+  systemQuantity  Decimal   @db.Decimal(14, 3)
+  countedQuantity Decimal?  @db.Decimal(14, 3)
+  difference      Decimal?  @db.Decimal(14, 3)
+  countedByUserId String?   @db.Uuid
+  countedAt       DateTime?
+  notes           String?
+
+  @@unique([inventoryId, productId])
+}
+
+model Waste {
+  id               String    @id @default(uuid()) @db.Uuid
+  companyId        String    @db.Uuid
+  branchId         String    @db.Uuid
+  productId        String    @db.Uuid
+  type             WasteType
+  quantity         Decimal   @db.Decimal(14, 3)
+  unitCostSnapshot Decimal   @db.Decimal(14, 2)
+  totalCost        Decimal   @db.Decimal(14, 2)
+  reason           String
+  notes            String?
+  userId           String    @db.Uuid
+  createdAt        DateTime  @default(now())
+
+  @@index([companyId, branchId, createdAt])
+  @@index([productId])
+}
+
+model StockTransfer {
+  id               String              @id @default(uuid()) @db.Uuid
+  companyId        String              @db.Uuid
+  fromBranchId     String              @db.Uuid
+  toBranchId       String              @db.Uuid
+  number           String
+  status           StockTransferStatus @default(DRAFT)
+  createdByUserId  String              @db.Uuid
+  sentByUserId     String?             @db.Uuid
+  receivedByUserId String?             @db.Uuid
+  createdAt        DateTime            @default(now())
+  sentAt           DateTime?
+  receivedAt       DateTime?
+  notes            String?
+  items            StockTransferItem[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status, createdAt])
+}
+
+model StockTransferItem {
+  id                String        @id @default(uuid()) @db.Uuid
+  transferId        String        @db.Uuid
+  transfer          StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productId         String        @db.Uuid
+  requestedQuantity Decimal       @db.Decimal(14, 3)
+  sentQuantity      Decimal       @default(0) @db.Decimal(14, 3)
+  receivedQuantity  Decimal       @default(0) @db.Decimal(14, 3)
+  notes             String?
+
+  @@unique([transferId, productId])
 }
 
 model User {

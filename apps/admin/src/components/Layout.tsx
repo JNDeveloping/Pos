@@ -23,6 +23,11 @@ import {
   ShoppingCart,
   Tags,
   Truck,
+  ArrowRightLeft,
+  ClipboardCheck,
+  History,
+  PackageX,
+  AlertTriangle,
   Users,
   X,
 } from 'lucide-react';
@@ -42,6 +47,17 @@ const groups: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = [
       ['/catalog', 'Catálogo maestro', LibraryBig, 'products.view'],
       ['/categories', 'Categorías', FolderTree, 'categories.view'],
       ['/brands', 'Marcas', Tags, 'brands.view'],
+    ],
+  },
+  {
+    label: 'INVENTARIO',
+    items: [
+      ['/admin/stock', 'Stock', Boxes, 'stock.view'],
+      ['/admin/stock/movements', 'Movimientos', History, 'stock.movements'],
+      ['/admin/inventory', 'Inventarios', ClipboardCheck, 'inventory.view'],
+      ['/admin/waste', 'Mermas', PackageX, 'waste.view'],
+      ['/admin/expirations', 'Vencimientos', AlertTriangle, 'expirations.view'],
+      ['/admin/transfers', 'Transferencias', ArrowRightLeft, 'transfers.view'],
     ],
   },
   {
