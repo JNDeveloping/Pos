@@ -1,0 +1,44 @@
+type Tokens = { accessToken: string; refreshToken: string };
+type AuthMessage = { type: 'REQUEST' } | { type: 'SESSION'; tokens: Tokens } | { type: 'LOGOUT' };
+const channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel('rincon-auth-session');
+const waiters = new Set<(tokens?: Tokens) => void>();
+
+function current(): Tokens | undefined {
+  const accessToken = sessionStorage.getItem('accessToken');
+  const refreshToken = sessionStorage.getItem('refreshToken');
+  return accessToken && refreshToken ? { accessToken, refreshToken } : undefined;
+}
+channel?.addEventListener('message', ({ data }: MessageEvent<AuthMessage>) => {
+  if (data.type === 'REQUEST') {
+    const tokens = current();
+    if (tokens) channel.postMessage({ type: 'SESSION', tokens } satisfies AuthMessage);
+  } else if (data.type === 'SESSION') {
+    sessionStorage.setItem('accessToken', data.tokens.accessToken);
+    sessionStorage.setItem('refreshToken', data.tokens.refreshToken);
+    waiters.forEach((resolve) => resolve(data.tokens));
+    waiters.clear();
+  } else {
+    sessionStorage.removeItem('accessToken');
+    sessionStorage.removeItem('refreshToken');
+  }
+});
+
+export function storeTokens(tokens: Tokens) {
+  sessionStorage.setItem('accessToken', tokens.accessToken);
+  sessionStorage.setItem('refreshToken', tokens.refreshToken);
+}
+export function clearTokens() {
+  sessionStorage.removeItem('accessToken');
+  sessionStorage.removeItem('refreshToken');
+  channel?.postMessage({ type: 'LOGOUT' } satisfies AuthMessage);
+}
+export async function requestTabSession(timeoutMs = 600): Promise<Tokens | undefined> {
+  const existing = current();
+  if (existing || !channel) return existing;
+  return new Promise((resolve) => {
+    const finish = (tokens?: Tokens) => { waiters.delete(finish); resolve(tokens); };
+    waiters.add(finish);
+    channel.postMessage({ type: 'REQUEST' } satisfies AuthMessage);
+    window.setTimeout(() => finish(), timeoutMs);
+  });
+}
