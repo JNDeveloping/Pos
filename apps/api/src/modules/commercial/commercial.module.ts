@@ -2,7 +2,7 @@ import { Body, Controller, Get, Injectable, Module, Param, Patch, Post, Query, F
 import { ChangeSource, Prisma, RoundingMode } from '@prisma/client';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsNumberString, IsOptional, IsString, IsUUID, Length, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CurrentSession, RequirePermissions, Session } from '../../common/auth';
+import { CurrentSession, RequirePermissions, Session, sessionCan } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
 
 export function markup(cost: Prisma.Decimal.Value, margin: Prisma.Decimal.Value) {
@@ -45,14 +45,14 @@ class CommercialService {
     return branch;
   }
   list(s: Session, branchId: string, search = '', page = 1, costs = false) {
-    if (costs && !s.permissions.includes('costs.view')) throw new ForbiddenException('No tiene permiso para ver costos');
+    if (costs && !sessionCan(s, 'costs.view')) throw new ForbiddenException('No tiene permiso para ver costos');
     const where: Prisma.BranchProductWhereInput = { branchId, enabled: true, branch: { companyId: s.companyId }, product: { deletedAt: null, OR: search ? [{ name: { contains: search, mode: 'insensitive' } }, { internalCode: { contains: search, mode: 'insensitive' } }, { barcodes: { some: { barcode: { contains: search } } } }] : undefined } };
     return this.db.$transaction(async (tx) => {
       const [data, total] = await Promise.all([
         tx.branchProduct.findMany({ where, include: { product: { include: { category: true, brand: true, barcodes: { where: { isPrimary: true }, take: 1 } } } }, orderBy: { product: { name: 'asc' } }, skip: (page - 1) * 30, take: 30 }),
         tx.branchProduct.count({ where }),
       ]);
-      return { data: s.permissions.includes('costs.view') ? data : data.map(({ cost: _cost, ...row }) => row), meta: { page, total, pages: Math.ceil(total / 30) } };
+      return { data: sessionCan(s, 'costs.view') ? data : data.map(({ cost: _cost, ...row }) => row), meta: { page, total, pages: Math.ceil(total / 30) } };
     });
   }
   async change(s: Session, productId: string, dto: ChangeDto, kind: 'PRICE' | 'COST', source = ChangeSource.MANUAL) {

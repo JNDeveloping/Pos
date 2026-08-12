@@ -51,7 +51,7 @@ describe('cliente API', () => {
         throw new TypeError('Failed to fetch');
       }),
     );
-    await expect(api('/products')).rejects.toThrow('Failed to fetch');
+    await expect(api('/products')).rejects.toThrow('Sin conexión al servidor');
     expect(storage.removeItem).not.toHaveBeenCalled();
   });
 

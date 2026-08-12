@@ -46,7 +46,8 @@ class InventoryDto {
   @IsString() @MinLength(2) name!: string;
   @IsEnum(InventoryType) type!: InventoryType;
   @IsOptional() @IsUUID() categoryId?: string;
-  @IsOptional() @IsArray() productIds?: string[];
+  @IsOptional() @IsArray() @IsUUID('4', { each: true }) productIds?: string[];
+  @IsOptional() @IsString() sector?: string;
   @IsOptional() @IsString() notes?: string;
 }
 class CountDto {
@@ -204,41 +205,57 @@ class StockController {
   @Get()
   @RequirePermissions('stock.view')
   async list(@CurrentSession() s: Session, @Query('branchId') branchId?: string, @Query('search') search = '') {
-    const rows = await this.db.stock.findMany({
-      where: { companyId: s.companyId, branchId: branchId || s.branchId || undefined },
-      orderBy: { updatedAt: 'desc' },
+    const effectiveBranchId = s.branchId ?? branchId;
+    const configs = await this.db.branchProduct.findMany({
+      where: {
+        branchId: effectiveBranchId,
+        enabled: true,
+        branch: { companyId: s.companyId, active: true, deletedAt: null },
+        product: {
+          companyId: s.companyId,
+          active: true,
+          deletedAt: null,
+          OR: search
+            ? [
+                { name: { contains: search, mode: 'insensitive' } },
+                { internalCode: { contains: search, mode: 'insensitive' } },
+                { barcodes: { some: { barcode: search } } },
+              ]
+            : undefined,
+        },
+      },
+      include: { product: { include: { category: true, brand: true } } },
+      orderBy: { product: { name: 'asc' } },
       take: 500,
     });
-    const products = await this.db.product.findMany({
+    const rows = await this.db.stock.findMany({
       where: {
         companyId: s.companyId,
-        id: { in: rows.map((x) => x.productId) },
-        OR: search
-          ? [
-              { name: { contains: search, mode: 'insensitive' } },
-              { internalCode: { contains: search, mode: 'insensitive' } },
-            ]
-          : undefined,
+        branchId: effectiveBranchId,
+        productId: { in: configs.map((config) => config.productId) },
       },
-      include: { category: true, brand: true, branchConfigs: true },
     });
-    const map = new Map(products.map((p) => [p.id, p]));
-    return rows
-      .filter((r) => map.has(r.productId))
-      .map((r) => {
-        const p = map.get(r.productId)!;
-        const available = Number(r.quantity) - Number(r.reservedQuantity);
-        const config = p.branchConfigs.find((x) => x.branchId === r.branchId);
-        const minimum = Number(config?.stockMinimum ?? 0);
-        return {
-          ...r,
-          product: p,
-          availableQuantity: available,
-          minimumStock: minimum,
-          status: stockStatus(available, minimum),
-          stockValue: Number(r.quantity) * Number(config?.cost ?? 0),
-        };
-      });
+    const stockByKey = new Map(rows.map((row) => [`${row.branchId}:${row.productId}`, row]));
+    return configs.map((config) => {
+      const stock = stockByKey.get(`${config.branchId}:${config.productId}`);
+      const quantity = Number(stock?.quantity ?? 0),
+        reserved = Number(stock?.reservedQuantity ?? 0),
+        available = quantity - reserved,
+        minimum = Number(config.stockMinimum);
+      return {
+        id: stock?.id ?? `empty:${config.id}`,
+        branchId: config.branchId,
+        productId: config.productId,
+        quantity,
+        reservedQuantity: reserved,
+        inTransitQuantity: Number(stock?.inTransitQuantity ?? 0),
+        product: config.product,
+        availableQuantity: available,
+        minimumStock: minimum,
+        status: stockStatus(available, minimum),
+        stockValue: quantity * Number(config.cost),
+      };
+    });
   }
   @Get('movements')
   @RequirePermissions('stock.movements')
@@ -295,6 +312,13 @@ class InventoryController {
           active: true,
           categoryId: dto.categoryId,
           id: dto.productIds?.length ? { in: dto.productIds } : undefined,
+          branchConfigs: {
+            some: {
+              branchId: dto.branchId,
+              enabled: true,
+              ...(dto.type === InventoryType.SECTOR && dto.sector ? { location: dto.sector } : {}),
+            },
+          },
         },
         select: { id: true },
       });
@@ -539,7 +563,7 @@ class TransferController {
           include: { items: true },
         });
         if (!transfer) throw new BadRequestException('Transferencia no recepcionable');
-        let complete = true;
+        const receivedById = new Map(dto.items.map((input) => [input.itemId, input.quantity]));
         for (const input of dto.items) {
           const item = transfer.items.find((x) => x.id === input.itemId);
           if (!item) throw new BadRequestException('Ítem inválido');
@@ -562,8 +586,10 @@ class TransferController {
             });
             await tx.stockTransferItem.update({ where: { id: item.id }, data: { receivedQuantity: input.quantity } });
           }
-          if (input.quantity < Number(item.sentQuantity)) complete = false;
         }
+        const complete = transfer.items.every(
+          (item) => (receivedById.get(item.id) ?? Number(item.receivedQuantity)) >= Number(item.sentQuantity),
+        );
         return tx.stockTransfer.update({
           where: { id },
           data: {

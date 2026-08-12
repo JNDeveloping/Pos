@@ -25,6 +25,8 @@ export const RequirePermissions = (...values: string[]) => SetMetadata(PERMISSIO
 export const CurrentSession = createParamDecorator(
   (_d: unknown, c: ExecutionContext) => c.switchToHttp().getRequest<{ session: Session }>().session,
 );
+export const sessionCan = (session: Session, permission: string) =>
+  session.roles.includes('SUPER_ADMIN') || session.permissions.includes(permission);
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(

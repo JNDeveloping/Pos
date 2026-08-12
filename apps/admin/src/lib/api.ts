@@ -43,17 +43,11 @@ export async function api<T>(path: string, options: RequestInit = {}) {
   if (!(options.body instanceof FormData) && !requestHeaders.has('Content-Type'))
     requestHeaders.set('Content-Type', 'application/json');
   if (token) requestHeaders.set('Authorization', `Bearer ${token}`);
-  let response = await fetch(`${API}${path}`, {
-    ...options,
-    headers: requestHeaders,
-  });
+  let response = await request(`${API}${path}`, { ...options, headers: requestHeaders });
   if (response.status === 401 && !path.startsWith('/auth/')) {
     token = await refreshAccessToken();
     requestHeaders.set('Authorization', `Bearer ${token}`);
-    response = await fetch(`${API}${path}`, {
-      ...options,
-      headers: requestHeaders,
-    });
+    response = await request(`${API}${path}`, { ...options, headers: requestHeaders });
   }
   const body = await readApiBody(response);
   if (!response.ok) {
@@ -61,6 +55,14 @@ export async function api<T>(path: string, options: RequestInit = {}) {
     throw new Error(error?.error?.message ?? error?.message ?? `Error HTTP ${response.status}`);
   }
   return body as T;
+}
+
+async function request(url: string, options: RequestInit) {
+  try {
+    return await fetch(url, options);
+  } catch (cause) {
+    throw new Error('Sin conexión al servidor. Verificá la red e intentá nuevamente.', { cause });
+  }
 }
 
 function refreshAccessToken() {
@@ -74,7 +76,7 @@ function refreshAccessToken() {
 async function performRefresh() {
   const refreshToken = sessionStorage.getItem('refreshToken');
   if (!refreshToken) throw new Error('La sesión expiró. Volvé a ingresar.');
-  const response = await fetch(`${API}/auth/refresh`, {
+  const response = await request(`${API}/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refreshToken }),

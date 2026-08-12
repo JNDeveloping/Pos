@@ -90,12 +90,19 @@ export class PriceResolutionService {
     if (!config?.enabled || !config.product.active)
       throw new BadRequestException('Este producto no está habilitado para esta sucursal');
     let price = config.salePrice;
-    if (priceListId) {
+    const branch = await tx.branch.findFirst({
+      where: { id: branchId, companyId: s.companyId, active: true, deletedAt: null },
+      select: { defaultPriceListId: true },
+    });
+    if (!branch) throw new BadRequestException('Sucursal inválida');
+    const effectivePriceListId = priceListId ?? branch.defaultPriceListId;
+    if (effectivePriceListId) {
       const list = await tx.priceListItem.findUnique({
-        where: { priceListId_branchId_productId: { priceListId, productId, branchId } },
+        where: { priceListId_branchId_productId: { priceListId: effectivePriceListId, productId, branchId } },
       });
       if (list) price = list.price;
     }
+    if (price.lte(0)) throw new BadRequestException(`El producto ${config.product.name} no tiene precio de venta`);
     return { config, price };
   }
 }
@@ -112,8 +119,13 @@ class SalesService {
       where: { operationId: dto.operationId },
       include: { items: true, payments: { include: { paymentMethod: true } } },
     });
-    if (previous) return this.visible(s, previous);
+    if (previous) {
+      if (previous.companyId !== s.companyId) throw new BadRequestException('operationId ya utilizado');
+      return this.visible(s, previous);
+    }
     if (!dto.items.length) throw new BadRequestException('La venta no tiene productos');
+    if (new Set(dto.items.map((item) => item.productId)).size !== dto.items.length)
+      throw new BadRequestException('Un producto no puede repetirse en varias líneas');
     return this.db.$transaction(
       async (tx) => {
         const branch = await tx.branch.findFirst({ where: { id: dto.branchId, companyId: s.companyId, active: true } });
@@ -461,6 +473,11 @@ class PosController {
     @Query('q') q = '',
   ) {
     if (s.branchId && s.branchId !== branchId) throw new BadRequestException('Sucursal inválida');
+    const branch = await this.db.branch.findFirst({
+      where: { id: branchId, companyId: s.companyId, active: true, deletedAt: null },
+      select: { allowNegativeStock: true, defaultPriceListId: true },
+    });
+    if (!branch) throw new BadRequestException('Sucursal inválida');
     const where: Prisma.ProductWhereInput = {
       companyId: s.companyId,
       active: true,
@@ -474,15 +491,39 @@ class PosController {
           ]
         : undefined,
     };
+    if (process.env.NODE_ENV !== 'production' && q) console.info('[POS] barcode/search received', { q, branchId });
     const products = await this.db.product.findMany({
       where,
-      include: { barcodes: true, branchConfigs: { where: { branchId, enabled: true } } },
+      include: { barcodes: true, branchConfigs: { where: { branchId } } },
       take: q ? 20 : 50,
     });
+    if (process.env.NODE_ENV !== 'production' && q) console.info('[POS] products found', { count: products.length });
+    const exact = q
+      ? products.find(
+          (product) =>
+            product.internalCode.toLowerCase() === q.toLowerCase() || product.barcodes.some((row) => row.barcode === q),
+        )
+      : undefined;
+    if (exact && !exact.branchConfigs[0]?.enabled)
+      throw new BadRequestException('El producto existe pero no está habilitado para esta sucursal');
+    if (exact && exact.branchConfigs[0]?.salePrice.lte(0))
+      throw new BadRequestException('El producto existe pero no tiene precio de venta');
     const stocks = await this.db.stock.findMany({ where: { branchId, productId: { in: products.map((p) => p.id) } } });
     const map = new Map(stocks.map((x) => [x.productId, x]));
+    const listPrices = branch.defaultPriceListId
+      ? await this.db.priceListItem.findMany({
+          where: { priceListId: branch.defaultPriceListId, branchId, productId: { in: products.map((p) => p.id) } },
+        })
+      : [];
+    const prices = new Map(listPrices.map((row) => [row.productId, row.price]));
+    if (exact) {
+      const stock = map.get(exact.id),
+        available = Number(stock?.quantity ?? 0) - Number(stock?.reservedQuantity ?? 0);
+      if (available <= 0 && !branch.allowNegativeStock)
+        throw new BadRequestException('El producto no tiene stock disponible');
+    }
     return products
-      .filter((p) => p.branchConfigs.length)
+      .filter((p) => p.branchConfigs[0]?.enabled)
       .map((p) => {
         const c = p.branchConfigs[0],
           st = map.get(p.id);
@@ -493,7 +534,7 @@ class PosController {
           shortName: p.shortName,
           internalCode: p.internalCode,
           barcode: p.barcodes.find((b) => b.isPrimary)?.barcode,
-          price: c.salePrice,
+          price: prices.get(p.id) ?? c.salePrice,
           available: Number(st?.quantity ?? 0) - Number(st?.reservedQuantity ?? 0),
           isWeighted: p.isWeighted,
           posFavorite: c.posFavorite,

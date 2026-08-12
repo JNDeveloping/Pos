@@ -91,6 +91,9 @@ class CorrectionDto {
   @IsUUID() productId!: string;
   @IsOptional() @IsBoolean() learnAlias?: boolean;
 }
+class ConfirmAnalysisDto {
+  @IsUUID() branchId!: string;
+}
 type UploadedInvoice = { buffer: Buffer; mimetype: string; size: number; originalname: string };
 @Injectable()
 class PurchasesService {
@@ -541,6 +544,14 @@ class InvoiceDocumentsService {
       take: 100,
     });
   }
+  async getDocument(s: Session, id: string) {
+    const document = await this.db.invoiceDocument.findFirst({
+      where: { id, companyId: s.companyId },
+      include: { supplier: true, purchase: true, items: { orderBy: { lineNumber: 'asc' } } },
+    });
+    if (!document) throw new NotFoundException('Documento no encontrado');
+    return document;
+  }
   async correct(s: Session, id: string, line: number, d: CorrectionDto) {
     const doc = await this.db.invoiceDocument.findFirst({ where: { id, companyId: s.companyId } }),
       item = await this.db.invoiceAnalysisItem.findUnique({
@@ -573,6 +584,87 @@ class InvoiceDocumentsService {
       });
     }
     return row;
+  }
+  async toPurchase(s: Session, id: string, branchId: string) {
+    const document = await this.db.invoiceDocument.findFirst({
+      where: { id, companyId: s.companyId },
+      include: { items: true },
+    });
+    if (!document) throw new NotFoundException('Documento no encontrado');
+    if (document.purchaseId) return this.db.purchase.findUnique({ where: { id: document.purchaseId } });
+    if (document.status !== 'REVIEW' || !document.supplierId)
+      throw new BadRequestException('La factura debe estar analizada y tener proveedor antes de confirmar');
+    const branch = await this.db.branch.findFirst({
+      where: { id: branchId, companyId: s.companyId, active: true, deletedAt: null },
+    });
+    if (!branch || (s.branchId && s.branchId !== branchId)) throw new NotFoundException('Sucursal no encontrada');
+    const included = document.items.filter((item) => item.status !== 'IGNORED');
+    if (!included.length || included.some((item) => item.status !== 'MATCHED' || !item.matchedProductId))
+      throw new BadRequestException('Revise y vincule todas las líneas antes de confirmar');
+    const parsed = document.analysisResult as unknown as InvoiceAnalysisResult;
+    if (!parsed?.document || !parsed.totals) throw new BadRequestException('El análisis no contiene datos de factura');
+    return this.db.$transaction(async (tx) => {
+      const costs = await tx.branchProduct.findMany({
+        where: { branchId, productId: { in: included.map((item) => item.matchedProductId!) } },
+      });
+      const costByProduct = new Map(costs.map((row) => [row.productId, row.cost]));
+      const items = included.map((item) => {
+        const units = item.totalUnits ?? item.packagesQuantity ?? new Prisma.Decimal(1),
+          unitCost = item.unitCost ?? new Prisma.Decimal(0),
+          gross = units.mul(unitCost),
+          discountPercent = item.discountPercent ?? new Prisma.Decimal(0),
+          total = item.total ?? gross.mul(new Prisma.Decimal(1).minus(discountPercent.div(100)));
+        return {
+          productId: item.matchedProductId!,
+          descriptionSnapshot: item.rawDescription,
+          supplierCodeSnapshot: item.supplierCode,
+          packagesQuantity: item.packagesQuantity ?? units,
+          unitsPerCase: item.unitsPerCase,
+          totalUnits: units,
+          unitCost,
+          previousCost: costByProduct.get(item.matchedProductId!) ?? 0,
+          discountPercent,
+          discountAmount: gross.minus(total),
+          taxRate: item.taxRate,
+          subtotal: gross,
+          total,
+        };
+      });
+      const purchase = await tx.purchase.create({
+        data: {
+          companyId: s.companyId,
+          branchId,
+          supplierId: document.supplierId!,
+          invoiceType: parsed.document.type,
+          invoiceNumber: parsed.document.number,
+          invoiceDate: parsed.document.date ? new Date(parsed.document.date) : document.createdAt,
+          receivedDate: new Date(),
+          subtotal:
+            parsed.totals.subtotal ?? items.reduce((sum, item) => sum.plus(item.subtotal), new Prisma.Decimal(0)),
+          discountTotal: parsed.totals.discount ?? 0,
+          taxTotal: parsed.totals.tax ?? 0,
+          otherCharges: parsed.totals.otherCharges ?? 0,
+          total: parsed.totals.total,
+          status: PurchaseStatus.REVIEW,
+          notes: `Creada desde factura analizada ${document.originalName}`,
+          createdByUserId: s.sub,
+          items: { create: items },
+        },
+      });
+      await tx.invoiceDocument.update({ where: { id }, data: { purchaseId: purchase.id, status: 'CONFIRMED' } });
+      await tx.auditLog.create({
+        data: {
+          companyId: s.companyId,
+          branchId,
+          userId: s.sub,
+          entityType: 'INVOICE_DOCUMENT',
+          entityId: id,
+          action: 'INVOICE_CONFIRMED',
+          metadata: { purchaseId: purchase.id },
+        },
+      });
+      return purchase;
+    });
   }
 }
 @Controller('purchase-orders')
@@ -656,6 +748,9 @@ class InvoicesAliasController {
   @Get() @RequirePermissions('invoices.view') list(@CurrentSession() s: Session) {
     return this.svc.list(s);
   }
+  @Get(':id') @RequirePermissions('invoices.view') get(@CurrentSession() s: Session, @Param('id') id: string) {
+    return this.svc.getDocument(s, id);
+  }
   @Post('upload')
   @RequirePermissions('invoices.upload')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024, files: 1 } }))
@@ -680,6 +775,13 @@ class InvoiceAnalysisController {
     @Body() d: CorrectionDto,
   ) {
     return this.svc.correct(s, id, Number(line), d);
+  }
+  @Post(':id/confirm') @RequirePermissions('invoices.confirm') confirm(
+    @CurrentSession() s: Session,
+    @Param('id') id: string,
+    @Body() d: ConfirmAnalysisDto,
+  ) {
+    return this.svc.toPurchase(s, id, d.branchId);
   }
 }
 @Module({

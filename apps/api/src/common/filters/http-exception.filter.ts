@@ -26,7 +26,12 @@ export class ApiExceptionFilter implements ExceptionFilter {
     if (exception instanceof Prisma.PrismaClientKnownRequestError && exception.code === 'P2002') {
       status = 409;
       code = 'DUPLICATE_RESOURCE';
-      message = 'Ya existe un registro con esos datos';
+      const target = Array.isArray(exception.meta?.target) ? exception.meta.target.map(String) : [];
+      message = target.includes('barcode')
+        ? 'El código de barras ya está asignado a otro producto'
+        : target.includes('operationId')
+          ? 'La operación ya fue procesada'
+          : 'Ya existe un registro con esos datos';
     }
     response.status(status).json({ success: false, error: { code, message, ...(details ? { details } : {}) } });
   }

@@ -17,11 +17,18 @@ class HealthController {
   async check() {
     const startedAt = Date.now();
     await this.db.$queryRaw`SELECT 1`;
-    const redis = await this.redis.client.ping();
+    let redis = 'unavailable';
+    if (this.redis.available) {
+      try {
+        redis = (await this.redis.client.ping()) === 'PONG' ? 'ok' : 'error';
+      } catch {
+        redis = 'unavailable';
+      }
+    }
     return {
-      status: 'ok',
+      status: redis === 'ok' ? 'ok' : 'degraded',
       database: 'ok',
-      redis: redis === 'PONG' ? 'ok' : 'error',
+      redis,
       timestamp: new Date().toISOString(),
       latencyMs: Date.now() - startedAt,
     };

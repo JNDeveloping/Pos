@@ -83,7 +83,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
   async function create(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    const p = await api<{ id: string }>('/products', {
+    await api<{ id: string }>('/products', {
       method: 'POST',
       body: JSON.stringify({
         internalCode: f.get('internalCode') || undefined,
@@ -105,29 +105,22 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         isWeighted: f.get('isWeighted') === 'on',
         allowManualPriceDefault: f.get('allowManualPriceDefault') === 'on',
         notes: f.get('notes') || undefined,
+        barcode: f.get('barcode') || undefined,
+        branchConfig: branchId
+          ? {
+              branchId,
+              cost: String(f.get(`cost-${branchId}`) || '0'),
+              salePrice: String(f.get(`price-${branchId}`) || '0'),
+              stockMinimum: String(f.get(`stock-${branchId}`) || '0'),
+              enabled: true,
+              posFavorite: f.get(`favorite-${branchId}`) === 'on',
+              allowManualPrice: f.get(`manual-${branchId}`) === 'on',
+              location: f.get(`location-${branchId}`) || undefined,
+              shelf: f.get(`shelf-${branchId}`) || undefined,
+            }
+          : undefined,
       }),
     });
-    for (const b of branches.filter((branch) => branch.id === branchId)) {
-      const cost = String(f.get(`cost-${b.id}`) || '0'),
-        salePrice = String(f.get(`price-${b.id}`) || '0');
-      await api(`/products/${p.id}/branches/${b.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          cost,
-          salePrice,
-          stockMinimum: String(f.get(`stock-${b.id}`) || '0'),
-          enabled: true,
-          posFavorite: f.get(`favorite-${b.id}`) === 'on',
-          allowManualPrice: f.get(`manual-${b.id}`) === 'on',
-          location: f.get(`location-${b.id}`) || undefined,
-          shelf: f.get(`shelf-${b.id}`) || undefined,
-          internalNotes: f.get(`notes-${b.id}`) || undefined,
-        }),
-      });
-    }
-    const barcode = String(f.get('barcode') || '');
-    if (barcode)
-      await api(`/products/${p.id}/barcodes`, { method: 'POST', body: JSON.stringify({ barcode, isPrimary: true }) });
     setShow(false);
     setDirty(false);
     load();
@@ -146,7 +139,18 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         subcategoria: String(row.Subcategoria ?? row.SUBCATEGORIA ?? '').trim() || undefined,
         costo: row.Costo === undefined ? undefined : String(row.Costo),
         precio: row.Precio === undefined ? undefined : String(row.Precio),
-        presentacion: row.Presentacion ? ({BOTELLA:'BOTTLE',LATA:'CAN',PAQUETE:'PACKAGE',CAJA:'BOX',BOLSA:'BAG',FRASCO:'JAR',UNIDAD:'UNIT',BULTO:'CASE'}[String(row.Presentacion).toUpperCase()] ?? String(row.Presentacion).toUpperCase()) : undefined,
+        presentacion: row.Presentacion
+          ? ({
+              BOTELLA: 'BOTTLE',
+              LATA: 'CAN',
+              PAQUETE: 'PACKAGE',
+              CAJA: 'BOX',
+              BOLSA: 'BAG',
+              FRASCO: 'JAR',
+              UNIDAD: 'UNIT',
+              BULTO: 'CASE',
+            }[String(row.Presentacion).toUpperCase()] ?? String(row.Presentacion).toUpperCase())
+          : undefined,
         contenido: row.Contenido === undefined ? undefined : String(row.Contenido),
         unidad: row.Unidad ? String(row.Unidad).toUpperCase() : undefined,
         unidadesPorBulto: row['Unidades por bulto'] ? Number(row['Unidades por bulto']) : undefined,
@@ -201,13 +205,55 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     await load();
   }
   async function exportCsv() {
-    const rows = await api<Array<Record<string, unknown>>>(`/products/export/data${branchId ? `?branchId=${branchId}` : ''}`);
-    const header = ['Código','Barcode','Producto','Categoría','Subcategoría','Marca','Presentación','Contenido','IVA','Costo','Precio','Margen'];
-    const csv = [header.join(','), ...rows.map((row) => {
-      const category=row.category as {name?:string}, subcategory=row.subcategory as {name?:string}|null, brand=row.brand as {name?:string}|null, barcodes=row.barcodes as {barcode:string}[], configs=row.branchConfigs as {cost?:string;salePrice:string;margin:string}[];
-      return [row.internalCode,barcodes[0]?.barcode,row.name,category?.name,subcategory?.name,brand?.name,row.presentationType,`${row.netContent??''} ${row.netContentUnit??''}`,row.taxRate,configs[0]?.cost,configs[0]?.salePrice,configs[0]?.margin].map(x=>`"${String(x??'').replaceAll('"','""')}"`).join(',');
-    })].join('\n');
-    const url=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'})); const link=document.createElement('a');link.href=url;link.download='productos.csv';link.click();URL.revokeObjectURL(url);
+    const rows = await api<Array<Record<string, unknown>>>(
+      `/products/export/data${branchId ? `?branchId=${branchId}` : ''}`,
+    );
+    const header = [
+      'Código',
+      'Barcode',
+      'Producto',
+      'Categoría',
+      'Subcategoría',
+      'Marca',
+      'Presentación',
+      'Contenido',
+      'IVA',
+      'Costo',
+      'Precio',
+      'Margen',
+    ];
+    const csv = [
+      header.join(','),
+      ...rows.map((row) => {
+        const category = row.category as { name?: string },
+          subcategory = row.subcategory as { name?: string } | null,
+          brand = row.brand as { name?: string } | null,
+          barcodes = row.barcodes as { barcode: string }[],
+          configs = row.branchConfigs as { cost?: string; salePrice: string; margin: string }[];
+        return [
+          row.internalCode,
+          barcodes[0]?.barcode,
+          row.name,
+          category?.name,
+          subcategory?.name,
+          brand?.name,
+          row.presentationType,
+          `${row.netContent ?? ''} ${row.netContentUnit ?? ''}`,
+          row.taxRate,
+          configs[0]?.cost,
+          configs[0]?.salePrice,
+          configs[0]?.margin,
+        ]
+          .map((x) => `"${String(x ?? '').replaceAll('"', '""')}"`)
+          .join(',');
+      }),
+    ].join('\n');
+    const url = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'productos.csv';
+    link.click();
+    URL.revokeObjectURL(url);
   }
   return (
     <>
@@ -221,7 +267,10 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="btn-secondary" onClick={()=>void exportCsv()}><FileSpreadsheet size={18}/>Exportar CSV</button>
+          <button className="btn-secondary" onClick={() => void exportCsv()}>
+            <FileSpreadsheet size={18} />
+            Exportar CSV
+          </button>
           <label className="btn-secondary cursor-pointer">
             <FileSpreadsheet size={18} /> Importar Excel
             <input
@@ -241,11 +290,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         </div>
       </div>
       {importing && <p className="mt-4 rounded-xl bg-brand-50 p-4 text-sm text-brand-800">{importing}</p>}
-      {loadError && (
-        <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">
-          {loadError}
-        </p>
-      )}
+      {loadError && <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">{loadError}</p>}
       {refreshing && <p className="mt-3 text-sm text-slate-500">Cargando desde el servidor…</p>}
       <label className="mt-4 flex min-h-11 items-center gap-3 text-sm font-medium">
         <input
@@ -330,7 +375,9 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                   </td>
                   <td className="p-4">
                     <div className="flex gap-2">
-                      <a className="text-brand-600" href={appPath(`/products/${p.id}`)}>Ver ficha</a>
+                      <a className="text-brand-600" href={appPath(`/products/${p.id}`)}>
+                        Ver ficha
+                      </a>
                       {branchId &&
                         !p.branchConfigs.some((config) => config.branch.id === branchId && config.enabled) && (
                           <button
@@ -345,7 +392,9 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                             Agregar a sucursal
                           </button>
                         )}
-                      <a className="text-brand-600" href={appPath(`/products/${p.id}`)}>Editar</a>
+                      <a className="text-brand-600" href={appPath(`/products/${p.id}`)}>
+                        Editar
+                      </a>
                       {p.active && (
                         <button
                           className="text-red-600"
@@ -409,7 +458,16 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                   <option value={x.id}>{x.name}</option>
                 ))}
               </select>
-              <select name="subcategoryId"><option value="">Sin subcategoría</option>{categories.filter(x=>x.parentId).map(x=><option value={x.id} key={x.id}>{x.name}</option>)}</select>
+              <select name="subcategoryId">
+                <option value="">Sin subcategoría</option>
+                {categories
+                  .filter((x) => x.parentId)
+                  .map((x) => (
+                    <option value={x.id} key={x.id}>
+                      {x.name}
+                    </option>
+                  ))}
+              </select>
               <select name="brandId">
                 <option value="">Sin marca</option>
                 {brands.map((x) => (
@@ -432,14 +490,31 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
               <input name="supplierReference" placeholder="Referencia externa / proveedor" />
               <select name="presentationType">
                 <option value="">Presentación</option>
-                {['UNIT','BOTTLE','CAN','PACKAGE','BOX','BAG','JAR','SACHET','PACK','TRAY','DISPLAY','CASE','OTHER'].map(
-                  (x) => (
-                    <option key={x}>{x}</option>
-                  ),
-                )}
+                {[
+                  'UNIT',
+                  'BOTTLE',
+                  'CAN',
+                  'PACKAGE',
+                  'BOX',
+                  'BAG',
+                  'JAR',
+                  'SACHET',
+                  'PACK',
+                  'TRAY',
+                  'DISPLAY',
+                  'CASE',
+                  'OTHER',
+                ].map((x) => (
+                  <option key={x}>{x}</option>
+                ))}
               </select>
               <input name="netContent" type="number" min="0" step="0.001" placeholder="Contenido neto" />
-              <select name="netContentUnit"><option value="">Unidad contenido</option>{['ML','L','G','KG','UN','M','CM','OTHER'].map(x=><option key={x}>{x}</option>)}</select>
+              <select name="netContentUnit">
+                <option value="">Unidad contenido</option>
+                {['ML', 'L', 'G', 'KG', 'UN', 'M', 'CM', 'OTHER'].map((x) => (
+                  <option key={x}>{x}</option>
+                ))}
+              </select>
               <input name="unitsPerCase" type="number" min="1" placeholder="Unidades por bulto" />
               <input name="caseBarcode" placeholder="Código de bulto" />
               <label className="flex items-center gap-2">

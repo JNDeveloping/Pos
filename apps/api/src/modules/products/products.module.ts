@@ -31,8 +31,21 @@ import {
   ArrayMaxSize,
   ValidateNested,
 } from 'class-validator';
-import { CurrentSession, RequirePermissions, Session } from '../../common/auth';
+import { CurrentSession, RequirePermissions, Session, sessionCan } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
+export const optionalBoolean = ({ value }: { value: unknown }) =>
+  value === undefined || value === null || value === '' ? undefined : value === true || value === 'true';
+class ProductBranchDto {
+  @IsUUID() branchId!: string;
+  @IsOptional() @IsNumberString() cost?: string;
+  @IsOptional() @IsNumberString() salePrice?: string;
+  @IsOptional() @IsNumberString() stockMinimum?: string;
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsBoolean() posFavorite?: boolean;
+  @IsOptional() @IsBoolean() allowManualPrice?: boolean;
+  @IsOptional() @IsString() location?: string;
+  @IsOptional() @IsString() shelf?: string;
+}
 class ProductDto {
   @IsOptional() @IsString() @Length(2, 50) internalCode?: string;
   @IsString() @Length(2, 180) name!: string;
@@ -54,6 +67,8 @@ class ProductDto {
   @IsOptional() @IsBoolean() isWeighted?: boolean;
   @IsOptional() @IsBoolean() allowManualPriceDefault?: boolean;
   @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsString() @Matches(/^\d+$/, { message: 'El código debe ser numérico' }) barcode?: string;
+  @IsOptional() @ValidateNested() @Type(() => ProductBranchDto) branchConfig?: ProductBranchDto;
 }
 class ProductPatchDto {
   @IsOptional() @IsString() @Length(2, 50) internalCode?: string;
@@ -102,13 +117,13 @@ class ListQuery {
   @IsOptional() @IsUUID() brandId?: string;
   @IsOptional() @IsUUID() subcategoryId?: string;
   @IsOptional() @IsEnum(PresentationType) presentationType?: PresentationType;
-  @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() withoutPrice?: boolean;
-  @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() withoutCost?: boolean;
-  @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() withoutBarcode?: boolean;
-  @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() posFavorite?: boolean;
+  @IsOptional() @Transform(optionalBoolean) @IsBoolean() withoutPrice?: boolean;
+  @IsOptional() @Transform(optionalBoolean) @IsBoolean() withoutCost?: boolean;
+  @IsOptional() @Transform(optionalBoolean) @IsBoolean() withoutBarcode?: boolean;
+  @IsOptional() @Transform(optionalBoolean) @IsBoolean() posFavorite?: boolean;
   @IsOptional() @IsUUID() branchId?: string;
-  @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() enabled?: boolean;
-  @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() active?: boolean;
+  @IsOptional() @Transform(optionalBoolean) @IsBoolean() enabled?: boolean;
+  @IsOptional() @Transform(optionalBoolean) @IsBoolean() active?: boolean;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 20;
 }
@@ -147,13 +162,23 @@ class ProductsController {
     _count: { select: { branchConfigs: { where: { enabled: true } } } },
   } as const;
   @Get() @RequirePermissions('products.view') async list(@CurrentSession() s: Session, @Query() q: ListQuery) {
-    if (s.branchId && q.branchId && s.branchId !== q.branchId) throw new ForbiddenException('Sucursal fuera de su alcance');
+    if (s.branchId && q.branchId && s.branchId !== q.branchId)
+      throw new ForbiddenException('Sucursal fuera de su alcance');
     const branchId = s.branchId ?? q.branchId;
     const branchConditions: Prisma.ProductWhereInput[] = [];
-    if (q.withoutPrice) branchConditions.push({ branchConfigs: { some: { ...(branchId ? { branchId } : {}), salePrice: 0 } } });
-    if (q.withoutCost) branchConditions.push({ branchConfigs: { some: { ...(branchId ? { branchId } : {}), cost: 0 } } });
-    if (q.posFavorite) branchConditions.push({ branchConfigs: { some: { ...(branchId ? { branchId } : {}), posFavorite: true } } });
-    if (branchId) branchConditions.push({ branchConfigs: q.enabled === false ? { none: { branchId, enabled: true } } : { some: { branchId, ...(q.enabled === true ? { enabled: true } : {}) } } });
+    if (q.withoutPrice)
+      branchConditions.push({ branchConfigs: { some: { ...(branchId ? { branchId } : {}), salePrice: 0 } } });
+    if (q.withoutCost)
+      branchConditions.push({ branchConfigs: { some: { ...(branchId ? { branchId } : {}), cost: 0 } } });
+    if (q.posFavorite)
+      branchConditions.push({ branchConfigs: { some: { ...(branchId ? { branchId } : {}), posFavorite: true } } });
+    if (branchId)
+      branchConditions.push({
+        branchConfigs:
+          q.enabled === false
+            ? { none: { branchId, enabled: true } }
+            : { some: { branchId, ...(q.enabled === true ? { enabled: true } : {}) } },
+      });
     const where: Prisma.ProductWhereInput = {
       companyId: s.companyId,
       deletedAt: null,
@@ -186,7 +211,7 @@ class ProductsController {
       }),
       this.db.product.count({ where }),
     ]);
-    const canViewCosts = s.permissions.includes('costs.view');
+    const canViewCosts = sessionCan(s, 'costs.view');
     const safeData = canViewCosts
       ? data
       : data.map((product) => ({
@@ -201,31 +226,108 @@ class ProductsController {
       include: this.include,
     });
     if (!p) throw new NotFoundException('Producto no encontrado');
-    if (s.permissions.includes('costs.view')) return p;
+    if (sessionCan(s, 'costs.view')) return p;
     return { ...p, branchConfigs: p.branchConfigs.map(({ cost: _cost, ...config }) => config) };
   }
   @Post() @RequirePermissions('products.create') async create(@CurrentSession() s: Session, @Body() d: ProductDto) {
     await this.validateRefs(s, d.categoryId, d.brandId, d.subcategoryId);
     if (d.caseBarcode) await this.ensureBarcodeAvailable(s, d.caseBarcode);
+    if (d.barcode) await this.ensureBarcodeAvailable(s, d.barcode);
+    if (d.branchConfig) {
+      const branch = await this.db.branch.findFirst({
+        where: { id: d.branchConfig.branchId, companyId: s.companyId, active: true, deletedAt: null },
+      });
+      if (!branch || (s.branchId && s.branchId !== branch.id)) throw new NotFoundException('Sucursal no encontrada');
+      if (d.branchConfig.cost !== undefined && !sessionCan(s, 'costs.update'))
+        throw new ForbiddenException('No tiene permiso para modificar costos');
+      if (d.branchConfig.salePrice !== undefined && !sessionCan(s, 'prices.update'))
+        throw new ForbiddenException('No tiene permiso para modificar precios');
+    }
     return this.db.$transaction(async (tx) => {
+      const { barcode, branchConfig, ...productInput } = d;
       const sequence = d.internalCode
         ? undefined
-        : await tx.company.update({ where: { id: s.companyId }, data: { productSequence: { increment: 1 } }, select: { productSequence: true } });
+        : await tx.company.update({
+            where: { id: s.companyId },
+            data: { productSequence: { increment: 1 } },
+            select: { productSequence: true },
+          });
       const product = await tx.product.create({
         data: {
-          ...d,
+          ...productInput,
           internalCode: d.internalCode?.toUpperCase() ?? `PROD-${String(sequence!.productSequence).padStart(6, '0')}`,
           taxRate: new Prisma.Decimal(d.taxRate),
           companyId: s.companyId,
         },
       });
-      if (d.caseBarcode) await tx.productBarcode.create({ data: { companyId: s.companyId, productId: product.id, barcode: d.caseBarcode, type: BarcodeType.CASE } });
-      await tx.auditLog.create({ data: { companyId: s.companyId, userId: s.sub, entityType: 'PRODUCT', entityId: product.id, action: 'PRODUCT_CREATED', after: this.json(product) } });
+      if (barcode)
+        await tx.productBarcode.create({
+          data: { companyId: s.companyId, productId: product.id, barcode, isPrimary: true },
+        });
+      if (d.caseBarcode)
+        await tx.productBarcode.create({
+          data: { companyId: s.companyId, productId: product.id, barcode: d.caseBarcode, type: BarcodeType.CASE },
+        });
+      if (branchConfig) {
+        const cost = this.money(branchConfig.cost ?? 0),
+          price = this.money(branchConfig.salePrice ?? 0),
+          margin = cost.gt(0) ? price.minus(cost).div(cost).mul(100).toDecimalPlaces(2) : new Prisma.Decimal(0);
+        await tx.branchProduct.create({
+          data: {
+            branchId: branchConfig.branchId,
+            productId: product.id,
+            cost,
+            salePrice: price,
+            margin,
+            stockMinimum: this.money(branchConfig.stockMinimum ?? 0),
+            enabled: branchConfig.enabled ?? true,
+            posFavorite: branchConfig.posFavorite ?? false,
+            allowManualPrice: branchConfig.allowManualPrice,
+            location: branchConfig.location,
+            shelf: branchConfig.shelf,
+          },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          companyId: s.companyId,
+          userId: s.sub,
+          entityType: 'PRODUCT',
+          entityId: product.id,
+          action: 'PRODUCT_CREATED',
+          after: this.json(product),
+        },
+      });
       return product;
     });
   }
-  @Get('export/data') @RequirePermissions('products.export') async exportData(@CurrentSession() s: Session, @Query('branchId') branchId?: string) {
-    return this.db.product.findMany({ where: { companyId: s.companyId, deletedAt: null }, select: { internalCode: true, name: true, shortName: true, sku: true, presentationType: true, netContent: true, netContentUnit: true, taxRate: true, category: { select: { name: true } }, subcategory: { select: { name: true } }, brand: { select: { name: true } }, barcodes: { orderBy: { isPrimary: 'desc' }, take: 1, select: { barcode: true } }, branchConfigs: { where: branchId ? { branchId } : undefined, select: { cost: s.permissions.includes('costs.view'), salePrice: true, margin: true, location: true } } }, take: 50000, orderBy: { name: 'asc' } });
+  @Get('export/data') @RequirePermissions('products.export') async exportData(
+    @CurrentSession() s: Session,
+    @Query('branchId') branchId?: string,
+  ) {
+    return this.db.product.findMany({
+      where: { companyId: s.companyId, deletedAt: null },
+      select: {
+        internalCode: true,
+        name: true,
+        shortName: true,
+        sku: true,
+        presentationType: true,
+        netContent: true,
+        netContentUnit: true,
+        taxRate: true,
+        category: { select: { name: true } },
+        subcategory: { select: { name: true } },
+        brand: { select: { name: true } },
+        barcodes: { orderBy: { isPrimary: 'desc' }, take: 1, select: { barcode: true } },
+        branchConfigs: {
+          where: branchId ? { branchId } : undefined,
+          select: { cost: sessionCan(s, 'costs.view'), salePrice: true, margin: true, location: true },
+        },
+      },
+      take: 50000,
+      orderBy: { name: 'asc' },
+    });
   }
   @Post('import') @RequirePermissions('products.import') async importBatch(
     @CurrentSession() s: Session,
@@ -275,13 +377,32 @@ class ProductsController {
           }
           let subcategory;
           if (row.subcategoria) {
-            subcategory = await tx.category.findFirst({ where: { companyId: s.companyId, parentId: category.id, name: { equals: row.subcategoria.trim(), mode: 'insensitive' }, deletedAt: null } });
-            if (!subcategory) subcategory = await tx.category.create({ data: { companyId: s.companyId, parentId: category.id, name: row.subcategoria.trim() } });
+            subcategory = await tx.category.findFirst({
+              where: {
+                companyId: s.companyId,
+                parentId: category.id,
+                name: { equals: row.subcategoria.trim(), mode: 'insensitive' },
+                deletedAt: null,
+              },
+            });
+            if (!subcategory)
+              subcategory = await tx.category.create({
+                data: { companyId: s.companyId, parentId: category.id, name: row.subcategoria.trim() },
+              });
           }
           let brand;
           if (row.marca) {
-            brand = await tx.brand.findFirst({ where: { companyId: s.companyId, name: { equals: row.marca.trim(), mode: 'insensitive' }, deletedAt: null } });
-            if (!brand) { brand = await tx.brand.create({ data: { companyId: s.companyId, name: row.marca.trim() } }); result.brandsCreated++; }
+            brand = await tx.brand.findFirst({
+              where: {
+                companyId: s.companyId,
+                name: { equals: row.marca.trim(), mode: 'insensitive' },
+                deletedAt: null,
+              },
+            });
+            if (!brand) {
+              brand = await tx.brand.create({ data: { companyId: s.companyId, name: row.marca.trim() } });
+              result.brandsCreated++;
+            }
           }
           const barcodeRecord = await tx.productBarcode.findUnique({
             where: { companyId_barcode: { companyId: s.companyId, barcode } },
@@ -291,7 +412,21 @@ class ProductsController {
           if (barcodeRecord) {
             product = await tx.product.update({
               where: { id: barcodeRecord.productId },
-              data: { name: row.descripcion.trim(), categoryId: category.id, subcategoryId: subcategory?.id, brandId: brand?.id, presentationType: row.presentacion, netContent: row.contenido, netContentUnit: row.unidad, unitsPerCase: row.unidadesPorBulto, caseBarcode: row.barcodeBulto, taxRate: row.iva, sku: row.sku, active: true, deletedAt: null },
+              data: {
+                name: row.descripcion.trim(),
+                categoryId: category.id,
+                subcategoryId: subcategory?.id,
+                brandId: brand?.id,
+                presentationType: row.presentacion,
+                netContent: row.contenido,
+                netContentUnit: row.unidad,
+                unitsPerCase: row.unidadesPorBulto,
+                caseBarcode: row.barcodeBulto,
+                taxRate: row.iva,
+                sku: row.sku,
+                active: true,
+                deletedAt: null,
+              },
             });
             result.updated++;
           } else {
@@ -310,7 +445,26 @@ class ProductsController {
                 caseBarcode: row.barcodeBulto,
                 taxRate: row.iva,
                 sku: row.sku,
-                barcodes: { create: [{ companyId: s.companyId, barcode, isPrimary: true, type: barcode.length === 13 ? BarcodeType.EAN13 : BarcodeType.OTHER }, ...(row.barcodeBulto && row.barcodeBulto !== barcode ? [{ companyId: s.companyId, barcode: row.barcodeBulto, isPrimary: false, type: BarcodeType.CASE }] : [])] },
+                barcodes: {
+                  create: [
+                    {
+                      companyId: s.companyId,
+                      barcode,
+                      isPrimary: true,
+                      type: barcode.length === 13 ? BarcodeType.EAN13 : BarcodeType.OTHER,
+                    },
+                    ...(row.barcodeBulto && row.barcodeBulto !== barcode
+                      ? [
+                          {
+                            companyId: s.companyId,
+                            barcode: row.barcodeBulto,
+                            isPrimary: false,
+                            type: BarcodeType.CASE,
+                          },
+                        ]
+                      : []),
+                  ],
+                },
               },
             });
             result.created++;
@@ -318,10 +472,36 @@ class ProductsController {
           if (d.enableForBranch && d.branchId)
             await tx.branchProduct.upsert({
               where: { branchId_productId: { branchId: d.branchId, productId: product.id } },
-              create: { branchId: d.branchId, productId: product.id, enabled: true, cost: row.costo ?? 0, salePrice: row.precio ?? 0, margin: row.costo && row.precio && Number(row.costo) > 0 ? ((Number(row.precio) - Number(row.costo)) / Number(row.costo)) * 100 : 0, location: row.ubicacion },
-              update: { enabled: true, ...(row.costo ? { cost: row.costo } : {}), ...(row.precio ? { salePrice: row.precio } : {}), ...(row.ubicacion ? { location: row.ubicacion } : {}) },
+              create: {
+                branchId: d.branchId,
+                productId: product.id,
+                enabled: true,
+                cost: row.costo ?? 0,
+                salePrice: row.precio ?? 0,
+                margin:
+                  row.costo && row.precio && Number(row.costo) > 0
+                    ? ((Number(row.precio) - Number(row.costo)) / Number(row.costo)) * 100
+                    : 0,
+                location: row.ubicacion,
+              },
+              update: {
+                enabled: true,
+                ...(row.costo ? { cost: row.costo } : {}),
+                ...(row.precio ? { salePrice: row.precio } : {}),
+                ...(row.ubicacion ? { location: row.ubicacion } : {}),
+              },
             });
-          await tx.auditLog.create({ data: { companyId: s.companyId, branchId: d.branchId, userId: s.sub, entityType: 'PRODUCT', entityId: product.id, action: 'IMPORT_EXECUTED', metadata: { barcode } } });
+          await tx.auditLog.create({
+            data: {
+              companyId: s.companyId,
+              branchId: d.branchId,
+              userId: s.sub,
+              entityType: 'PRODUCT',
+              entityId: product.id,
+              action: 'IMPORT_EXECUTED',
+              metadata: { barcode },
+            },
+          });
         });
       } catch (error) {
         result.skipped++;
@@ -330,23 +510,68 @@ class ProductsController {
     }
     return result;
   }
-  @Post(':id/duplicate') @RequirePermissions('products.create') async duplicate(@CurrentSession() s: Session, @Param('id') id: string, @Body() body: { name?: string; copyBranchConfig?: boolean }) {
-    const source = await this.db.product.findFirst({ where: { id, companyId: s.companyId, deletedAt: null }, include: { branchConfigs: true } });
+  @Post(':id/duplicate') @RequirePermissions('products.create') async duplicate(
+    @CurrentSession() s: Session,
+    @Param('id') id: string,
+    @Body() body: { name?: string; copyBranchConfig?: boolean },
+  ) {
+    const source = await this.db.product.findFirst({
+      where: { id, companyId: s.companyId, deletedAt: null },
+      include: { branchConfigs: true },
+    });
     if (!source) throw new NotFoundException('Producto no encontrado');
     return this.db.$transaction(async (tx) => {
-      const company = await tx.company.update({ where: { id: s.companyId }, data: { productSequence: { increment: 1 } }, select: { productSequence: true } });
+      const company = await tx.company.update({
+        where: { id: s.companyId },
+        data: { productSequence: { increment: 1 } },
+        select: { productSequence: true },
+      });
       const { branchConfigs } = source;
-      const product = await tx.product.create({ data: {
-        companyId: s.companyId, internalCode: `PROD-${String(company.productSequence).padStart(6, '0')}`,
-        name: body.name?.trim() || `${source.name} (copia)`, shortName: source.shortName, description: source.description,
-        categoryId: source.categoryId, subcategoryId: source.subcategoryId, brandId: source.brandId, unitType: source.unitType,
-        presentationType: source.presentationType, netContent: source.netContent, netContentUnit: source.netContentUnit,
-        taxRate: source.taxRate, imageUrl: source.imageUrl, sku: source.sku, supplierReference: source.supplierReference,
-        unitsPerCase: source.unitsPerCase, caseBarcode: source.caseBarcode, isWeighted: source.isWeighted,
-        allowManualPriceDefault: source.allowManualPriceDefault, notes: source.notes, active: true,
-      } });
-      if (body.copyBranchConfig) await tx.branchProduct.createMany({ data: branchConfigs.map(({ id: _configId, productId: _productId, createdAt: _cc, updatedAt: _cu, ...config }) => ({ ...config, productId: product.id })) });
-      await tx.auditLog.create({ data: { companyId: s.companyId, userId: s.sub, entityType: 'PRODUCT', entityId: product.id, action: 'PRODUCT_CREATED', metadata: { duplicatedFrom: id } } });
+      const product = await tx.product.create({
+        data: {
+          companyId: s.companyId,
+          internalCode: `PROD-${String(company.productSequence).padStart(6, '0')}`,
+          name: body.name?.trim() || `${source.name} (copia)`,
+          shortName: source.shortName,
+          description: source.description,
+          categoryId: source.categoryId,
+          subcategoryId: source.subcategoryId,
+          brandId: source.brandId,
+          unitType: source.unitType,
+          presentationType: source.presentationType,
+          netContent: source.netContent,
+          netContentUnit: source.netContentUnit,
+          taxRate: source.taxRate,
+          imageUrl: source.imageUrl,
+          sku: source.sku,
+          supplierReference: source.supplierReference,
+          unitsPerCase: source.unitsPerCase,
+          caseBarcode: source.caseBarcode,
+          isWeighted: source.isWeighted,
+          allowManualPriceDefault: source.allowManualPriceDefault,
+          notes: source.notes,
+          active: true,
+        },
+      });
+      if (body.copyBranchConfig)
+        await tx.branchProduct.createMany({
+          data: branchConfigs.map(
+            ({ id: _configId, productId: _productId, createdAt: _cc, updatedAt: _cu, ...config }) => ({
+              ...config,
+              productId: product.id,
+            }),
+          ),
+        });
+      await tx.auditLog.create({
+        data: {
+          companyId: s.companyId,
+          userId: s.sub,
+          entityType: 'PRODUCT',
+          entityId: product.id,
+          action: 'PRODUCT_CREATED',
+          metadata: { duplicatedFrom: id },
+        },
+      });
       return product;
     });
   }
@@ -360,12 +585,32 @@ class ProductsController {
     if (d.caseBarcode && d.caseBarcode !== before.caseBarcode) await this.ensureBarcodeAvailable(s, d.caseBarcode, id);
     if (d.categoryId) await this.validateRefs(s, d.categoryId, d.brandId, d.subcategoryId);
     return this.db.$transaction(async (tx) => {
-      const product = await tx.product.update({ where: { id }, data: { ...d, internalCode: d.internalCode?.toUpperCase(), taxRate: d.taxRate ? new Prisma.Decimal(d.taxRate) : undefined } });
+      const product = await tx.product.update({
+        where: { id },
+        data: {
+          ...d,
+          internalCode: d.internalCode?.toUpperCase(),
+          taxRate: d.taxRate ? new Prisma.Decimal(d.taxRate) : undefined,
+        },
+      });
       if (d.caseBarcode !== undefined && d.caseBarcode !== before.caseBarcode) {
         await tx.productBarcode.deleteMany({ where: { productId: id, type: BarcodeType.CASE } });
-        if (d.caseBarcode) await tx.productBarcode.create({ data: { companyId: s.companyId, productId: id, barcode: d.caseBarcode, type: BarcodeType.CASE } });
+        if (d.caseBarcode)
+          await tx.productBarcode.create({
+            data: { companyId: s.companyId, productId: id, barcode: d.caseBarcode, type: BarcodeType.CASE },
+          });
       }
-      await tx.auditLog.create({ data: { companyId: s.companyId, userId: s.sub, entityType: 'PRODUCT', entityId: id, action: 'PRODUCT_UPDATED', before: this.json(before), after: this.json(product) } });
+      await tx.auditLog.create({
+        data: {
+          companyId: s.companyId,
+          userId: s.sub,
+          entityType: 'PRODUCT',
+          entityId: id,
+          action: 'PRODUCT_UPDATED',
+          before: this.json(before),
+          after: this.json(product),
+        },
+      });
       return product;
     });
   }
@@ -376,7 +621,16 @@ class ProductsController {
     await this.owned(s, id);
     return this.db.$transaction(async (tx) => {
       const product = await tx.product.update({ where: { id }, data: { active: false, deletedAt: new Date() } });
-      await tx.auditLog.create({ data: { companyId: s.companyId, userId: s.sub, entityType: 'PRODUCT', entityId: id, action: 'PRODUCT_DISABLED', after: this.json(product) } });
+      await tx.auditLog.create({
+        data: {
+          companyId: s.companyId,
+          userId: s.sub,
+          entityType: 'PRODUCT',
+          entityId: id,
+          action: 'PRODUCT_DISABLED',
+          after: this.json(product),
+        },
+      });
       return product;
     });
   }
@@ -396,10 +650,20 @@ class ProductsController {
     @Body() d: BarcodeDto,
   ) {
     await this.owned(s, id);
+    await this.ensureBarcodeAvailable(s, d.barcode, id);
     return this.db.$transaction(async (tx) => {
       if (d.isPrimary) await tx.productBarcode.updateMany({ where: { productId: id }, data: { isPrimary: false } });
       const barcode = await tx.productBarcode.create({ data: { ...d, companyId: s.companyId, productId: id } });
-      await tx.auditLog.create({ data: { companyId: s.companyId, userId: s.sub, entityType: 'PRODUCT', entityId: id, action: 'BARCODE_ADDED', after: this.json(barcode) } });
+      await tx.auditLog.create({
+        data: {
+          companyId: s.companyId,
+          userId: s.sub,
+          entityType: 'PRODUCT',
+          entityId: id,
+          action: 'BARCODE_ADDED',
+          after: this.json(barcode),
+        },
+      });
       return barcode;
     });
   }
@@ -411,7 +675,16 @@ class ProductsController {
     await this.owned(s, id);
     return this.db.$transaction(async (tx) => {
       const barcode = await tx.productBarcode.delete({ where: { id: barcodeId, productId: id } });
-      await tx.auditLog.create({ data: { companyId: s.companyId, userId: s.sub, entityType: 'PRODUCT', entityId: id, action: 'BARCODE_REMOVED', before: this.json(barcode) } });
+      await tx.auditLog.create({
+        data: {
+          companyId: s.companyId,
+          userId: s.sub,
+          entityType: 'PRODUCT',
+          entityId: id,
+          action: 'BARCODE_REMOVED',
+          before: this.json(barcode),
+        },
+      });
       return barcode;
     });
   }
@@ -425,7 +698,7 @@ class ProductsController {
       include: { branch: true },
       orderBy: { branch: { name: 'asc' } },
     });
-    return s.permissions.includes('costs.view') ? configs : configs.map(({ cost: _cost, ...config }) => config);
+    return sessionCan(s, 'costs.view') ? configs : configs.map(({ cost: _cost, ...config }) => config);
   }
   @Patch(':id/branches/:branchId') @RequirePermissions('products.update') async branch(
     @CurrentSession() s: Session,
@@ -433,8 +706,10 @@ class ProductsController {
     @Param('branchId') branchId: string,
     @Body() d: ConfigDto,
   ) {
-    if (d.cost !== undefined && !s.permissions.includes('costs.update')) throw new ForbiddenException('No tiene permiso para modificar costos');
-    if ((d.salePrice !== undefined || d.margin !== undefined) && !s.permissions.includes('prices.update')) throw new ForbiddenException('No tiene permiso para modificar precios');
+    if (d.cost !== undefined && !sessionCan(s, 'costs.update'))
+      throw new ForbiddenException('No tiene permiso para modificar costos');
+    if ((d.salePrice !== undefined || d.margin !== undefined) && !sessionCan(s, 'prices.update'))
+      throw new ForbiddenException('No tiene permiso para modificar precios');
     await this.owned(s, id);
     const branch = await this.db.branch.findFirst({ where: { id: branchId, companyId: s.companyId, deletedAt: null } });
     if (!branch || (s.branchId && s.branchId !== branchId)) throw new NotFoundException('Sucursal no encontrada');
@@ -479,13 +754,40 @@ class ProductsController {
       });
       if (current && !current.salePrice.equals(price))
         await tx.priceHistory.create({
-          data: { productId: id, branchId, oldPrice: current.salePrice, newPrice: price, percentageChange: this.percentage(current.salePrice, price), source: d.source ?? ChangeSource.MANUAL, changedByUserId: s.sub },
+          data: {
+            productId: id,
+            branchId,
+            oldPrice: current.salePrice,
+            newPrice: price,
+            percentageChange: this.percentage(current.salePrice, price),
+            source: d.source ?? ChangeSource.MANUAL,
+            changedByUserId: s.sub,
+          },
         });
       if (current && !current.cost.equals(cost))
         await tx.costHistory.create({
-          data: { productId: id, branchId, oldCost: current.cost, newCost: cost, percentageChange: this.percentage(current.cost, cost), source: d.source ?? ChangeSource.MANUAL, changedByUserId: s.sub },
+          data: {
+            productId: id,
+            branchId,
+            oldCost: current.cost,
+            newCost: cost,
+            percentageChange: this.percentage(current.cost, cost),
+            source: d.source ?? ChangeSource.MANUAL,
+            changedByUserId: s.sub,
+          },
         });
-      await tx.auditLog.create({ data: { companyId: s.companyId, branchId, userId: s.sub, entityType: 'BRANCH_PRODUCT', entityId: config.id, action: current ? 'BRANCH_PRODUCT_UPDATED' : 'PRODUCT_ENABLED', before: current ? this.json(current) : undefined, after: this.json(config) } });
+      await tx.auditLog.create({
+        data: {
+          companyId: s.companyId,
+          branchId,
+          userId: s.sub,
+          entityType: 'BRANCH_PRODUCT',
+          entityId: config.id,
+          action: current ? 'BRANCH_PRODUCT_UPDATED' : 'PRODUCT_ENABLED',
+          before: current ? this.json(current) : undefined,
+          after: this.json(config),
+        },
+      });
       return config;
     });
   }
@@ -544,19 +846,29 @@ class ProductsController {
     if (!p) throw new NotFoundException('Producto no encontrado');
     return p;
   }
-  private percentage(oldValue: Prisma.Decimal, newValue: Prisma.Decimal) { return oldValue.eq(0) ? new Prisma.Decimal(0) : newValue.minus(oldValue).div(oldValue).mul(100).toDecimalPlaces(2); }
-  private json(value: unknown) { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
+  private percentage(oldValue: Prisma.Decimal, newValue: Prisma.Decimal) {
+    return oldValue.eq(0) ? new Prisma.Decimal(0) : newValue.minus(oldValue).div(oldValue).mul(100).toDecimalPlaces(2);
+  }
+  private json(value: unknown) {
+    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+  }
   private async validateRefs(s: Session, categoryId: string, brandId?: string, subcategoryId?: string) {
     const [c, b, subcategory] = await Promise.all([
       this.db.category.findFirst({ where: { id: categoryId, companyId: s.companyId, deletedAt: null } }),
       brandId ? this.db.brand.findFirst({ where: { id: brandId, companyId: s.companyId, deletedAt: null } }) : true,
-      subcategoryId ? this.db.category.findFirst({ where: { id: subcategoryId, companyId: s.companyId, parentId: categoryId, deletedAt: null } }) : true,
+      subcategoryId
+        ? this.db.category.findFirst({
+            where: { id: subcategoryId, companyId: s.companyId, parentId: categoryId, deletedAt: null },
+          })
+        : true,
     ]);
     if (!c || !b || !subcategory) throw new BadRequestException('Categoría, subcategoría o marca inválida');
   }
   private async ensureBarcodeAvailable(s: Session, barcode: string, productId?: string) {
     if (!/^\d+$/.test(barcode)) throw new BadRequestException('El código de bulto debe ser numérico');
-    const conflict = await this.db.productBarcode.findFirst({ where: { companyId: s.companyId, barcode, ...(productId ? { productId: { not: productId } } : {}) } });
+    const conflict = await this.db.productBarcode.findFirst({
+      where: { companyId: s.companyId, barcode, ...(productId ? { productId: { not: productId } } : {}) },
+    });
     if (conflict) throw new BadRequestException('El código de barras ya pertenece a otro producto');
   }
 }
