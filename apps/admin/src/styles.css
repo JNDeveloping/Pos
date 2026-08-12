@@ -1,0 +1,241 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@layer base {
+  * {
+    @apply border-slate-200;
+  }
+  html {
+    color-scheme: light;
+  }
+  body {
+    @apply m-0 bg-slate-50 font-sans text-slate-800 antialiased;
+  }
+  input,
+  select,
+  textarea {
+    @apply min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-4 focus:ring-brand-100;
+  }
+  button {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold transition focus:outline-none focus:ring-4 focus:ring-brand-100 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply tracking-tight text-slate-900;
+  }
+  table {
+    @apply text-sm;
+  }
+  th {
+    @apply border-b bg-slate-50 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  td {
+    @apply border-b border-slate-100 px-4 py-3.5 align-middle;
+  }
+  tbody tr {
+    @apply transition hover:bg-blue-50/40;
+  }
+}
+@layer components {
+  .app-shell {
+    @apply grid min-h-screen transition-[grid-template-columns] duration-300;
+  }
+  .sidebar {
+    @apply sticky top-0 h-screen flex-col overflow-y-auto border-r bg-white p-3 text-slate-700;
+  }
+  .sidebar-brand {
+    @apply mb-3 flex min-h-16 items-center gap-3 px-2;
+  }
+  .sidebar-brand small {
+    @apply text-xs font-medium text-slate-400;
+  }
+  .brand-mark {
+    @apply grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-lg shadow-blue-200;
+  }
+  .sidebar-nav {
+    @apply flex-1 space-y-4 overflow-y-auto py-2;
+  }
+  .nav-group {
+    @apply space-y-1;
+  }
+  .nav-label {
+    @apply mb-1 px-3 text-[10px] font-bold tracking-[.14em] text-slate-400;
+  }
+  .nav-item {
+    @apply flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900;
+  }
+  .nav-item-active {
+    @apply bg-blue-50 text-brand-600 hover:bg-blue-50 hover:text-brand-700;
+  }
+  .topbar {
+    @apply sticky top-0 z-30 flex min-h-16 items-center gap-3 border-b bg-white/95 px-4 backdrop-blur lg:px-6;
+  }
+  .icon-button {
+    @apply relative grid h-10 w-10 place-items-center rounded-lg p-0 text-slate-500 hover:bg-slate-100 hover:text-brand-600;
+  }
+  .notification-dot {
+    @apply absolute right-2 top-2 h-2 w-2 rounded-full border-2 border-white bg-red-500;
+  }
+  .global-search {
+    @apply hidden h-10 max-w-xl flex-1 items-center gap-2 rounded-lg border bg-slate-50 px-3 text-slate-400 sm:flex;
+  }
+  .global-search input {
+    @apply min-h-0 w-full border-0 bg-transparent p-0 shadow-none focus:ring-0;
+  }
+  .profile-button {
+    @apply gap-2 p-1 pr-2 hover:bg-slate-100;
+  }
+  .profile-button b {
+    @apply block text-xs text-slate-700;
+  }
+  .profile-button small {
+    @apply block max-w-36 truncate text-[10px] font-medium text-slate-400;
+  }
+  .avatar {
+    @apply grid h-9 w-9 place-items-center rounded-full bg-brand-600 text-xs font-bold text-white;
+  }
+  .profile-menu {
+    @apply absolute right-0 top-12 z-50 w-52 rounded-xl border bg-white p-1 shadow-card;
+  }
+  .profile-menu button {
+    @apply w-full justify-start text-red-600 hover:bg-red-50;
+  }
+  .context-bar {
+    @apply flex min-h-12 flex-wrap items-center justify-between gap-3 border-b bg-white px-4 text-xs lg:px-7;
+  }
+  .context-bar > div {
+    @apply flex items-center gap-1.5;
+  }
+  .branch-select {
+    @apply flex items-center gap-2 text-slate-500;
+  }
+  .branch-select select {
+    @apply min-h-8 border-0 bg-transparent py-0 pr-8 font-semibold text-slate-700 focus:ring-0;
+  }
+  .page-content {
+    @apply mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-7;
+  }
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white shadow-card;
+  }
+  .btn,
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border bg-white px-4 py-2.5 font-semibold text-slate-700 shadow-sm hover:bg-slate-50;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700;
+  }
+  .metric-card {
+    @apply card relative overflow-hidden p-5 transition hover:-translate-y-0.5 hover:shadow-lg;
+  }
+  .metric-icon {
+    @apply grid h-10 w-10 place-items-center rounded-lg bg-blue-50 text-brand-600;
+  }
+  .skeleton {
+    @apply animate-pulse rounded-lg bg-slate-200;
+  }
+  .toolbar {
+    @apply flex flex-col gap-3 border-b p-4 sm:flex-row;
+  }
+  .search-field {
+    @apply flex min-w-0 flex-1 items-center gap-2 rounded-lg border bg-white px-3 text-slate-500;
+  }
+  .search-field input {
+    @apply min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none outline-none;
+  }
+  .empty-state {
+    @apply grid min-h-56 place-items-center gap-2 p-8 text-center text-slate-500;
+  }
+  .empty-state h2 {
+    @apply text-xl font-bold text-slate-800;
+  }
+  .badge-warning {
+    @apply bg-amber-50 text-amber-800;
+  }
+  .modal-backdrop {
+    @apply fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4 backdrop-blur-sm;
+  }
+  .modal-card {
+    @apply grid w-full max-w-lg gap-4 rounded-2xl bg-white p-6 shadow-2xl;
+  }
+  .modal-card label {
+    @apply grid gap-1.5 text-sm font-semibold text-slate-700;
+  }
+}
+@media (max-width: 639px) {
+  .page-content {
+    @apply p-3;
+  }
+  .card {
+    @apply rounded-xl;
+  }
+  h1 {
+    @apply text-2xl;
+  }
+  td,
+  th {
+    @apply px-3;
+  }
+}
+@media print {
+  body {
+    background: white !important;
+  }
+  .no-print,
+  aside,
+  header,
+  .context-bar {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  .print-grid {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4mm;
+  }
+  .print-label {
+    break-inside: avoid;
+    border: 1px solid #111;
+    padding: 5mm;
+    text-align: center;
+    min-height: 45mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .print-label h2 {
+    font-size: 16pt;
+    font-weight: 700;
+  }
+  .print-label .price {
+    display: block;
+    font-size: 26pt;
+    margin: 3mm 0;
+  }
+  .print-label .offer {
+    color: #b91c1c;
+    font-size: 18pt;
+  }
+  .label-template-a5_offer,
+  .label-template-a4_offer {
+    grid-template-columns: 1fr;
+  }
+  .label-template-a5_offer .print-label {
+    min-height: 130mm;
+  }
+  .label-template-a4_offer .print-label {
+    min-height: 270mm;
+  }
+}
+@media screen {
+  .print-grid {
+    display: none;
+  }
+}

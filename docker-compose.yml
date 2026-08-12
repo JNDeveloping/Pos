@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rincon
+      POSTGRES_USER: rincon
+      POSTGRES_PASSWORD: rincon_dev
+    ports: ['5432:5432']
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck: { test: ['CMD-SHELL', 'pg_isready -U rincon'], interval: 5s, timeout: 3s, retries: 10 }
+  redis:
+    image: redis:7-alpine
+    ports: ['6379:6379']
+    volumes: [redis_data:/data]
+    healthcheck: { test: ['CMD', 'redis-cli', 'ping'], interval: 5s, timeout: 3s, retries: 10 }
+  api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://rincon:rincon_dev@postgres:5432/rincon?schema=public
+      REDIS_URL: redis://redis:6379
+    ports: ['127.0.0.1:${PORT:-3002}:${PORT:-3002}']
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+volumes: { postgres_data: {}, redis_data: {} }

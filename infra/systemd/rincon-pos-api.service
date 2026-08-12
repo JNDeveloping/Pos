@@ -1,0 +1,27 @@
+[Unit]
+Description=API POS de El Rincon de los Nietos
+Wants=network-online.target
+After=network-online.target postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/grupolosnietos/pos
+# Optional at systemd parsing time so the preflight below can report a clear,
+# actionable error when the file is missing or unreadable.
+EnvironmentFile=-/var/www/grupolosnietos/pos/.env
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStartPre=/usr/bin/env sh /var/www/grupolosnietos/pos/infra/scripts/check-api-service.sh
+ExecStart=/usr/bin/env node /var/www/grupolosnietos/pos/apps/api/dist/src/main.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillSignal=SIGTERM
+SyslogIdentifier=rincon-pos-api
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
