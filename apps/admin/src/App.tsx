@@ -35,6 +35,7 @@ import { StockOperations } from './pages/StockOperations';
 import { Pos } from './pages/Pos';
 import { SalesAdmin } from './pages/SalesAdmin';
 import { SaleDetail } from './pages/SaleDetail';
+import { PosSettingsPage } from './pages/PosSettings';
 const pages: Record<string, React.ReactNode> = {
   '/admin': <Dashboard />,
   '/branches': <Branches />,
@@ -77,6 +78,7 @@ const pages: Record<string, React.ReactNode> = {
   '/admin/sales': <SalesAdmin kind="sales" />,
   '/admin/payment-methods': <SalesAdmin kind="payment-methods" />,
   '/admin/terminals': <SalesAdmin kind="terminals" />,
+  '/admin/pos-settings': <PosSettingsPage />,
 };
 const routePermissions: Record<string, string> = {
   '/suppliers': 'suppliers.view',
@@ -100,6 +102,7 @@ const routePermissions: Record<string, string> = {
   '/admin/sales': 'sales.view',
   '/admin/payment-methods': 'paymentMethods.view',
   '/admin/terminals': 'terminals.view',
+  '/admin/pos-settings': 'terminals.manage',
 };
 export default function App() {
   const route = currentRoute();

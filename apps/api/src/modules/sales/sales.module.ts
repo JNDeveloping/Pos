@@ -464,83 +464,156 @@ class SalesService {
   }
 }
 
-@Controller('pos')
-class PosController {
+type PosProduct = {
+  id: string;
+  branchProductId: string;
+  name: string;
+  shortName: string | null;
+  internalCode: string;
+  barcode?: string;
+  brand?: string;
+  presentation?: string;
+  unitType: string;
+  price: Prisma.Decimal;
+  available: number;
+  stockMinimum: number;
+  location?: string;
+  isWeighted: boolean;
+  posFavorite: boolean;
+  allowManualPrice: boolean;
+  allowNegativeStock: boolean;
+};
+
+@Injectable()
+export class PosCatalogService {
   constructor(private db: PrismaService) {}
-  @Get('products') @RequirePermissions('sales.access') async products(
-    @CurrentSession() s: Session,
-    @Query('branchId') branchId: string,
-    @Query('q') q = '',
-  ) {
-    if (s.branchId && s.branchId !== branchId) throw new BadRequestException('Sucursal inválida');
+
+  private async branch(s: Session, branchId: string) {
+    if (!branchId || (s.branchId && s.branchId !== branchId)) throw new BadRequestException('Sucursal inválida');
     const branch = await this.db.branch.findFirst({
       where: { id: branchId, companyId: s.companyId, active: true, deletedAt: null },
       select: { allowNegativeStock: true, defaultPriceListId: true },
     });
     if (!branch) throw new BadRequestException('Sucursal inválida');
-    const where: Prisma.ProductWhereInput = {
-      companyId: s.companyId,
-      active: true,
-      OR: q
-        ? [
-            { name: { contains: q, mode: 'insensitive' } },
-            { shortName: { contains: q, mode: 'insensitive' } },
-            { internalCode: { contains: q, mode: 'insensitive' } },
-            { sku: { contains: q, mode: 'insensitive' } },
-            { barcodes: { some: { barcode: q } } },
-          ]
-        : undefined,
-    };
-    if (process.env.NODE_ENV !== 'production' && q) console.info('[POS] barcode/search received', { q, branchId });
+    return branch;
+  }
+
+  private async resolve(s: Session, branchId: string, where: Prisma.ProductWhereInput, exactLabel?: string) {
+    const branch = await this.branch(s, branchId);
     const products = await this.db.product.findMany({
-      where,
-      include: { barcodes: true, branchConfigs: { where: { branchId } } },
-      take: q ? 20 : 50,
+      where: { companyId: s.companyId, deletedAt: null, ...where },
+      include: { brand: true, barcodes: true, branchConfigs: { where: { branchId } } },
+      orderBy: { name: 'asc' },
+      take: exactLabel ? 2 : 30,
     });
-    if (process.env.NODE_ENV !== 'production' && q) console.info('[POS] products found', { count: products.length });
-    const exact = q
-      ? products.find(
-          (product) =>
-            product.internalCode.toLowerCase() === q.toLowerCase() || product.barcodes.some((row) => row.barcode === q),
-        )
-      : undefined;
+    if (exactLabel && !products.length) throw new NotFoundException(`El código ${exactLabel} no está registrado`);
+    const exact = exactLabel ? products[0] : undefined;
+    if (exact && !exact.active) throw new BadRequestException('El producto está desactivado');
     if (exact && !exact.branchConfigs[0]?.enabled)
       throw new BadRequestException('El producto existe pero no está habilitado para esta sucursal');
-    if (exact && exact.branchConfigs[0]?.salePrice.lte(0))
-      throw new BadRequestException('El producto existe pero no tiene precio de venta');
-    const stocks = await this.db.stock.findMany({ where: { branchId, productId: { in: products.map((p) => p.id) } } });
-    const map = new Map(stocks.map((x) => [x.productId, x]));
-    const listPrices = branch.defaultPriceListId
-      ? await this.db.priceListItem.findMany({
-          where: { priceListId: branch.defaultPriceListId, branchId, productId: { in: products.map((p) => p.id) } },
-        })
-      : [];
-    const prices = new Map(listPrices.map((row) => [row.productId, row.price]));
-    if (exact) {
-      const stock = map.get(exact.id),
-        available = Number(stock?.quantity ?? 0) - Number(stock?.reservedQuantity ?? 0);
-      if (available <= 0 && !branch.allowNegativeStock)
-        throw new BadRequestException('El producto no tiene stock disponible');
-    }
-    return products
-      .filter((p) => p.branchConfigs[0]?.enabled)
-      .map((p) => {
-        const c = p.branchConfigs[0],
-          st = map.get(p.id);
+    const ids = products.map((product) => product.id);
+    const [stocks, listPrices] = await Promise.all([
+      this.db.stock.findMany({ where: { branchId, productId: { in: ids } } }),
+      branch.defaultPriceListId
+        ? this.db.priceListItem.findMany({
+            where: { priceListId: branch.defaultPriceListId, branchId, productId: { in: ids } },
+          })
+        : [],
+    ]);
+    const stockByProduct = new Map(stocks.map((stock) => [stock.productId, stock]));
+    const priceByProduct = new Map(listPrices.map((price) => [price.productId, price.price]));
+    const result: PosProduct[] = products
+      .filter((product) => product.active && product.branchConfigs[0]?.enabled)
+      .map((product) => {
+        const config = product.branchConfigs[0];
+        const stock = stockByProduct.get(product.id);
         return {
-          id: p.id,
-          branchProductId: c.id,
-          name: p.name,
-          shortName: p.shortName,
-          internalCode: p.internalCode,
-          barcode: p.barcodes.find((b) => b.isPrimary)?.barcode,
-          price: prices.get(p.id) ?? c.salePrice,
-          available: Number(st?.quantity ?? 0) - Number(st?.reservedQuantity ?? 0),
-          isWeighted: p.isWeighted,
-          posFavorite: c.posFavorite,
-          allowManualPrice: c.allowManualPrice ?? p.allowManualPriceDefault,
+          id: product.id,
+          branchProductId: config.id,
+          name: product.name,
+          shortName: product.shortName,
+          internalCode: product.internalCode,
+          barcode: product.barcodes.find((barcode) => barcode.isPrimary)?.barcode ?? product.barcodes[0]?.barcode,
+          brand: product.brand?.name,
+          presentation: product.presentationType ?? undefined,
+          unitType: product.unitType,
+          price: priceByProduct.get(product.id) ?? config.salePrice,
+          available: Number(stock?.quantity ?? 0) - Number(stock?.reservedQuantity ?? 0),
+          stockMinimum: Number(config.stockMinimum),
+          location: config.location ?? undefined,
+          isWeighted: product.isWeighted,
+          posFavorite: config.posFavorite,
+          allowManualPrice: config.allowManualPrice ?? product.allowManualPriceDefault,
+          allowNegativeStock: branch.allowNegativeStock,
         };
       });
+    if (exact) {
+      const item = result[0];
+      if (!item) throw new BadRequestException('El producto no está disponible para la venta');
+      if (item.price.lte(0)) throw new BadRequestException('Producto sin precio');
+      if (item.available <= 0 && !branch.allowNegativeStock) throw new BadRequestException('Producto sin stock');
+    }
+    return result.filter((item) => item.price.gt(0));
+  }
+
+  byBarcode(s: Session, branchId: string, barcode: string) {
+    if (!/^\d{3,64}$/.test(barcode)) throw new BadRequestException('Código de barras inválido');
+    return this.resolve(s, branchId, { barcodes: { some: { barcode } } }, barcode).then((items) => items[0]);
+  }
+
+  async search(s: Session, branchId: string, query: string) {
+    const q = query.trim();
+    if (q.length < 2) throw new BadRequestException('Ingresá al menos 2 caracteres');
+    const exactCode = await this.db.product.findFirst({
+      where: { companyId: s.companyId, deletedAt: null, internalCode: { equals: q, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    return this.resolve(
+      s,
+      branchId,
+      exactCode
+        ? { id: exactCode.id }
+        : {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { shortName: { contains: q, mode: 'insensitive' } },
+              { internalCode: { contains: q, mode: 'insensitive' } },
+              { sku: { contains: q, mode: 'insensitive' } },
+              { brand: { name: { contains: q, mode: 'insensitive' } } },
+              { barcodes: { some: { barcode: q } } },
+            ],
+          },
+      exactCode ? q : undefined,
+    );
+  }
+
+  favorites(s: Session, branchId: string) {
+    return this.resolve(s, branchId, { branchConfigs: { some: { branchId, enabled: true, posFavorite: true } } });
+  }
+}
+
+@Controller('pos/products')
+class PosController {
+  constructor(private catalog: PosCatalogService) {}
+  @Get('by-barcode/:barcode') @RequirePermissions('sales.access') byBarcode(
+    @CurrentSession() s: Session,
+    @Param('barcode') barcode: string,
+    @Query('branchId') branchId: string,
+  ) {
+    return this.catalog.byBarcode(s, branchId, barcode);
+  }
+  @Get('search') @RequirePermissions('sales.access') search(
+    @CurrentSession() s: Session,
+    @Query('branchId') branchId: string,
+    @Query('q') q = '',
+  ) {
+    return this.catalog.search(s, branchId, q);
+  }
+  @Get('favorites') @RequirePermissions('sales.access') favorites(
+    @CurrentSession() s: Session,
+    @Query('branchId') branchId: string,
+  ) {
+    return this.catalog.favorites(s, branchId);
   }
 }
 @Controller('sales')
@@ -616,6 +689,6 @@ class TerminalsController {
 @Module({
   imports: [StockModule],
   controllers: [PosController, SalesController, PaymentMethodsController, TerminalsController],
-  providers: [SalesService, PriceResolutionService],
+  providers: [SalesService, PriceResolutionService, PosCatalogService],
 })
 export class SalesModule {}

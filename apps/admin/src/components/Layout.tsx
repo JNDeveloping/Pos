@@ -56,6 +56,7 @@ const groups: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = [
       ['/admin/sales', 'Ventas', ReceiptText, 'sales.view'],
       ['/admin/payment-methods', 'Métodos de pago', CreditCard, 'paymentMethods.view'],
       ['/admin/terminals', 'Terminales', Monitor, 'terminals.view'],
+      ['/admin/pos-settings', 'Configurar POS', Settings, 'terminals.manage'],
     ],
   },
   {
