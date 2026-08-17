@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Save, Upload, X } from 'lucide-react';
 import { branchContext } from '../lib/branch-context';
+import { api } from '../lib/api';
 import { loadPosSettings, savePosSettings, type PosSettings } from '../lib/pos-settings';
 const tabs = [
   'GENERAL',
@@ -46,14 +47,18 @@ export function Settings() {
   const branchId = branchContext.get(),
     [pos, setPos] = useState<PosSettings>(loadPosSettings(branchId));
   useEffect(() => {
-    try {
-      setPrefs({ ...defaults, ...JSON.parse(localStorage.getItem('system-preferences') ?? '{}') });
-    } catch {
-      /* defaults */
-    }
-  }, []);
-  const save = () => {
-    localStorage.setItem('system-preferences', JSON.stringify(prefs));
+    void api<{ appearance?: Partial<Preferences>; pos?: PosSettings }>(`/settings${branchId ? `?branchId=${branchId}` : ''}`).then(
+      (data) => {
+        setPrefs({ ...defaults, ...data.appearance });
+        if (data.pos) setPos(data.pos);
+      },
+    );
+  }, [branchId]);
+  const save = async () => {
+    await api(`/settings${branchId ? `?branchId=${branchId}` : ''}`, {
+      method: 'PUT',
+      body: JSON.stringify({ appearance: prefs, pos }),
+    });
     if (branchId) savePosSettings(branchId, pos);
     document.documentElement.style.setProperty('--brand-primary', prefs.primaryColor);
     setSaved(true);
@@ -72,7 +77,7 @@ export function Settings() {
           <h1>Configuración</h1>
           <p>Comportamiento y apariencia en una única sección.</p>
         </div>
-        <button className="btn-primary" onClick={save}>
+        <button className="btn-primary" onClick={() => void save()}>
           <Save size={17} />
           Guardar cambios
         </button>

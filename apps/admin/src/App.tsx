@@ -106,7 +106,20 @@ const routePermissions: Record<string, string> = {
   '/admin/pos-settings': 'terminals.manage',
 };
 export default function App() {
-  const route = currentRoute();
+  const rawRoute = currentRoute();
+  const redirects: Record<string, string> = {
+    '/admin/prices': '/products?tab=pricing',
+    '/admin/costs': '/products?tab=pricing',
+    '/admin/roles': '/users?tab=roles',
+    '/admin/inventory': '/admin/stock',
+    '/admin/stock/movements': '/admin/stock',
+    '/admin/transfers': '/admin/stock',
+    '/admin/purchase-orders': '/admin/purchases',
+  };
+  if (redirects[rawRoute]) {
+    window.history.replaceState({}, '', `${import.meta.env.BASE_URL.replace(/\/$/, '')}${redirects[rawRoute]}`);
+  }
+  const route = redirects[rawRoute]?.split('?')[0] ?? rawRoute;
   const [me, setMe] = useState<Me>(),
     [ready, setReady] = useState(false),
     [branches, setBranches] = useState<Branch[]>([]),

@@ -101,11 +101,37 @@ model Company {
   purchaseOrders   PurchaseOrder[]
   purchases        Purchase[]
   invoiceDocuments InvoiceDocument[]
+  settings         CompanySetting[]
+  branchSettings   BranchSetting[]
+}
+
+
+model CompanySetting {
+  id String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  key String
+  value Json
+  updatedAt DateTime @updatedAt
+  @@unique([companyId, key])
+}
+model BranchSetting {
+  id String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  branchId String @db.Uuid
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  key String
+  value Json
+  updatedAt DateTime @updatedAt
+  @@unique([branchId, key])
+  @@index([companyId, key])
 }
 
 model Branch {
   id                              String          @id @default(uuid()) @db.Uuid
   companyId                       String          @db.Uuid
+  settings                        BranchSetting[]
   company                         Company         @relation(fields: [companyId], references: [id])
   name                            String
   code                            String
