@@ -20,6 +20,7 @@ type Product = {
   active: boolean;
   category: Ref;
   brand?: Ref;
+  family?: Ref;
   branchConfigs: Config[];
   barcodes: { barcode: string }[];
   _count?: { branchConfigs: number };
@@ -41,7 +42,8 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     [enableDuringImport, setEnableDuringImport] = useState(mode === 'branch'),
     [importing, setImporting] = useState(''),
     [refreshing, setRefreshing] = useState(false),
-    [loadError, setLoadError] = useState('');
+    [loadError, setLoadError] = useState(''),
+    [selected, setSelected] = useState<Set<string>>(new Set());
   const [dirty, setDirty] = useState(false);
   const load = async () => {
     setRefreshing(true);
@@ -289,6 +291,62 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
           </button>
         </div>
       </div>
+      <nav className="mt-5 flex gap-2 overflow-x-auto border-b">
+        <a className="product-subtab active" href={appPath('/products')}>
+          Productos
+        </a>
+        <a className="product-subtab" href={appPath('/categories')}>
+          Categorías
+        </a>
+        <button
+          className="product-subtab"
+          onClick={() => alert('Las familias se administran desde la ficha del producto.')}
+        >
+          Familias
+        </button>
+        <a className="product-subtab" href={appPath('/prices')}>
+          Precios y márgenes
+        </a>
+      </nav>
+      {selected.size > 0 && (
+        <div className="bulk-action-bar">
+          <b>{selected.size} seleccionados</b>
+          <button
+            onClick={async () => {
+              const pct = Number(prompt('Porcentaje de aumento (use negativo para disminuir)', '6'));
+              if (!Number.isFinite(pct) || !branchId) return;
+              await api('/prices/bulk/apply', {
+                method: 'POST',
+                body: JSON.stringify({
+                  branchId,
+                  operation: 'PERCENT',
+                  value: String(pct),
+                  products: [...selected].map((productId) => ({ productId })),
+                }),
+              });
+              setSelected(new Set());
+              await load();
+            }}
+          >
+            Aumentar precios
+          </button>
+          <button onClick={() => (window.location.href = appPath('/labels'))}>Generar etiquetas</button>
+          <button
+            className="text-red-700"
+            onClick={async () => {
+              if (!confirm(`Se eliminarán ${selected.size} productos. ¿Continuar?`)) return;
+              await api('/products/bulk-disable', {
+                method: 'POST',
+                body: JSON.stringify({ productIds: [...selected] }),
+              });
+              setSelected(new Set());
+              await load();
+            }}
+          >
+            Desactivar
+          </button>
+        </div>
+      )}
       {importing && <p className="mt-4 rounded-xl bg-brand-50 p-4 text-sm text-brand-800">{importing}</p>}
       {loadError && <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">{loadError}</p>}
       {refreshing && <p className="mt-3 text-sm text-slate-500">Cargando desde el servidor…</p>}
@@ -337,9 +395,17 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         <table className="w-full whitespace-nowrap text-left text-sm">
           <thead className="border-b bg-slate-50 text-xs uppercase text-slate-500">
             <tr>
+              <th className="p-4">
+                <input
+                  type="checkbox"
+                  aria-label="Seleccionar página"
+                  checked={Boolean(result?.data.length) && selected.size === result?.data.length}
+                  onChange={(e) => setSelected(e.target.checked ? new Set(result?.data.map((p) => p.id)) : new Set())}
+                />
+              </th>
               {(mode === 'master'
-                ? ['Código', 'Producto', 'Categoría', 'Marca', 'Sucursales', 'Estado', 'Acciones']
-                : ['Código', 'Producto', 'Categoría', 'Marca', 'Precio', 'Costo', 'Margen', 'Estado', 'Acciones']
+                ? ['Código', 'Producto', 'Categoría', 'Familia', 'Sucursales', 'Estado', 'Acciones']
+                : ['Código', 'Producto', 'Categoría', 'Familia', 'Precio', 'Costo', 'Margen', 'Estado', 'Acciones']
               ).map((x) => (
                 <th className="p-4" key={x}>
                   {x}
@@ -352,13 +418,27 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
               const c = branchId ? p.branchConfigs.find((config) => config.branch.id === branchId) : p.branchConfigs[0];
               return (
                 <tr className="border-b last:border-0" key={p.id}>
+                  <td className="p-4">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(p.id)}
+                      onChange={(e) =>
+                        setSelected((current) => {
+                          const next = new Set(current);
+                          if (e.target.checked) next.add(p.id);
+                          else next.delete(p.id);
+                          return next;
+                        })
+                      }
+                    />
+                  </td>
                   <td className="p-4 font-mono">{p.internalCode}</td>
                   <td className="p-4 font-semibold">
                     {p.name}
                     <small className="block text-slate-400">{p.barcodes[0]?.barcode}</small>
                   </td>
                   <td className="p-4">{p.category.name}</td>
-                  <td className="p-4">{p.brand?.name ?? '—'}</td>
+                  <td className="p-4">{p.family?.name ?? '—'}</td>
                   {mode === 'master' ? (
                     <td className="p-4">
                       {p._count?.branchConfigs ?? p.branchConfigs.filter((x) => x.enabled).length}

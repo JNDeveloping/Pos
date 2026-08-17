@@ -8,6 +8,7 @@ import { branchContext } from './lib/branch-context';
 import { Dashboard } from './pages/Dashboard';
 import { Branches, type Branch } from './pages/Branches';
 import { Diagnostics } from './pages/Diagnostics';
+import { Settings } from './pages/Settings';
 import { Login } from './pages/Login';
 import { Products } from './pages/Products';
 import { SimpleCrud } from './pages/SimpleCrud';
@@ -45,7 +46,7 @@ const pages: Record<string, React.ReactNode> = {
   '/products': <Products />,
   '/catalog': <Products mode="master" />,
   '/roles': <Roles />,
-  '/settings': <Diagnostics />,
+  '/settings': <Settings />,
   '/admin/diagnostics': <Diagnostics />,
   '/prices': <Commerce kind="prices" />,
   '/costs': <Commerce kind="costs" />,

@@ -94,6 +94,7 @@ model Company {
   categories       Category[]
   brands           Brand[]
   products         Product[]
+  productFamilies  ProductFamily[]
   priceLists       PriceList[]
   auditLogs        AuditLog[]
   suppliers        Supplier[]
@@ -625,6 +626,22 @@ model Brand {
   @@index([companyId, active])
 }
 
+
+model ProductFamily {
+  id          String    @id @default(uuid()) @db.Uuid
+  companyId   String    @db.Uuid
+  company     Company   @relation(fields: [companyId], references: [id])
+  name        String
+  description String?
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  products    Product[]
+
+  @@unique([companyId, name])
+  @@index([companyId, active, name])
+}
+
 model Product {
   id                      String                 @id @default(uuid()) @db.Uuid
   companyId               String                 @db.Uuid
@@ -634,6 +651,8 @@ model Product {
   subcategoryId           String?                @db.Uuid
   subcategory             Category?              @relation("ProductSubcategory", fields: [subcategoryId], references: [id])
   brandId                 String?                @db.Uuid
+  familyId                String?                @db.Uuid
+  family                  ProductFamily?         @relation(fields: [familyId], references: [id])
   brand                   Brand?                 @relation(fields: [brandId], references: [id])
   internalCode            String
   name                    String
@@ -673,6 +692,7 @@ model Product {
   @@index([categoryId])
   @@index([subcategoryId])
   @@index([brandId])
+  @@index([familyId])
 }
 
 model ProductBarcode {
@@ -880,6 +900,8 @@ model SupplierProduct {
   supplierBarcode     String?
   unitsPerCase        Int?
   lastCost            Decimal?            @db.Decimal(14, 2)
+  minimumOrderQuantity Decimal?           @db.Decimal(14, 3)
+  preferredSupplier    Boolean            @default(false)
   lastPurchaseAt      DateTime?
   active              Boolean             @default(true)
   createdAt           DateTime            @default(now())
@@ -890,6 +912,7 @@ model SupplierProduct {
   @@unique([supplierId, productId])
   @@unique([supplierId, supplierCode])
   @@index([supplierId, supplierBarcode])
+  @@index([productId, supplierCode])
 }
 
 model SupplierProductAlias {

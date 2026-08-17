@@ -1,206 +1,214 @@
 import { useEffect, useState } from 'react';
-import type { LucideIcon } from 'lucide-react';
 import {
   AlertTriangle,
-  ArrowRight,
-  Building2,
-  CheckCircle2,
-  FolderTree,
-  Package,
-  PackageCheck,
+  ArrowDownRight,
+  ArrowUpRight,
+  CalendarDays,
+  PackageX,
+  ReceiptText,
   RefreshCw,
-  Tags,
-  Users,
+  ShoppingBag,
+  TrendingUp,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { branchContext } from '../lib/branch-context';
-import { appPath } from '../lib/navigation';
-type S = {
-  products: number;
-  activeProducts: number;
-  activeBranches: number;
-  activeUsers: number;
-  categories: number;
-  productsWithoutPrice: number;
-  productsWithoutCost: number;
-  productsWithoutBarcode: number;
+type Summary = {
+  todaySales: number;
+  yesterdaySales: number;
+  comparison: number | null;
+  monthSales: number;
+  ticketsToday: number;
+  averageTicket: number;
+  estimatedProfit: number;
+  lowStock: number;
+  outOfStock: number;
+  expiring: number;
   lowMargin: number;
-  pricesChangedToday: number;
-  productsWithoutBranchConfig: number;
-  enabledInBranch: number;
+  daily: { date: string; total: number }[];
+  topProducts: { productId: string; productNameSnapshot: string; _sum: { quantity: string; subtotal: string } }[];
+  recentSales: {
+    id: string;
+    saleNumber: string;
+    completedAt: string;
+    total: string;
+    user?: { firstName: string; lastName: string };
+    payments: { paymentMethod: { name: string } }[];
+  }[];
+  paymentMethods: { name: string; total: number }[];
 };
-type Metric = { label: string; value: number | undefined; icon: LucideIcon; tone: string; hint: string };
+const money = (n: number) =>
+  n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
 export function Dashboard() {
-  const [s, setS] = useState<S>(),
+  const [s, setS] = useState<Summary>(),
     [error, setError] = useState(''),
-    [refreshing, setRefreshing] = useState(false);
-  async function load() {
-    setRefreshing(true);
+    [busy, setBusy] = useState(false);
+  const load = async () => {
+    setBusy(true);
     setError('');
     try {
-      const branchId = branchContext.get();
-      setS(await api<S>(`/dashboard/summary${branchId ? `?branchId=${branchId}` : ''}`));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo cargar el resumen');
+      const id = branchContext.get();
+      setS(await api(`/dashboard/summary${id ? `?branchId=${id}` : ''}`));
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
-      setRefreshing(false);
+      setBusy(false);
     }
-  }
+  };
   useEffect(() => {
     void load();
   }, []);
-  const cards: Metric[] = [
-    {
-      label: 'Productos en catálogo',
-      value: s?.products,
-      icon: Package,
-      tone: 'bg-blue-50 text-blue-600',
-      hint: `${s?.activeProducts ?? 0} activos`,
-    },
-    {
-      label: 'Habilitados en sucursal',
-      value: s?.enabledInBranch,
-      icon: PackageCheck,
-      tone: 'bg-emerald-50 text-emerald-600',
-      hint: 'Listos para comercializar',
-    },
-    {
-      label: 'Sucursales activas',
-      value: s?.activeBranches,
-      icon: Building2,
-      tone: 'bg-violet-50 text-violet-600',
-      hint: 'Organización actual',
-    },
-    {
-      label: 'Usuarios activos',
-      value: s?.activeUsers,
-      icon: Users,
-      tone: 'bg-amber-50 text-amber-600',
-      hint: 'Con acceso al sistema',
-    },
-  ];
-  const alerts = [
-    ['Productos sin precio', s?.productsWithoutPrice, '/prices'],
-    ['Productos sin costo', s?.productsWithoutCost, '/costs'],
-    ['Productos sin barcode', s?.productsWithoutBarcode, '/products'],
-    ['Margen debajo del mínimo', s?.lowMargin, '/prices'],
-  ];
-  const quality = [
-    ['Con precio', (s?.enabledInBranch ?? 0) - (s?.productsWithoutPrice ?? 0), s?.enabledInBranch],
-    ['Con costo', (s?.enabledInBranch ?? 0) - (s?.productsWithoutCost ?? 0), s?.enabledInBranch],
-    ['Con barcode', (s?.products ?? 0) - (s?.productsWithoutBarcode ?? 0), s?.products],
-  ] as const;
+  const max = Math.max(1, ...(s?.daily.map((x) => x.total) ?? []));
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
+      <header className="page-heading">
         <div>
-          <p className="mb-1 text-xs font-bold uppercase tracking-[.16em] text-brand-600">Resumen general</p>
-          <h1 className="text-3xl font-bold">Panel administrativo</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Visión operativa del catálogo y la organización, actualizada desde el servidor.
-          </p>
+          <p className="eyebrow">OPERACIÓN DE HOY</p>
+          <h1>Inicio</h1>
+          <p>Ventas, rentabilidad y alertas que requieren una decisión.</p>
         </div>
-        <button className="btn-secondary" onClick={() => void load()} disabled={refreshing}>
-          <RefreshCw size={17} className={refreshing ? 'animate-spin' : ''} />
-          {refreshing ? 'Actualizando…' : 'Actualizar'}
+        <button className="btn-secondary" onClick={() => void load()}>
+          <RefreshCw className={busy ? 'animate-spin' : ''} size={17} />
+          Actualizar
         </button>
       </header>
-      {error && (
-        <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          <AlertTriangle className="shrink-0" size={20} />
-          <span>{error}</span>
-        </div>
-      )}
+      {error && <div className="rounded-xl bg-red-50 p-4 text-red-700">{error}</div>}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map(({ label, value, icon: Icon, tone, hint }) => (
-          <article className="metric-card" key={label}>
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-sm font-medium text-slate-500">{label}</p>
-                {value === undefined ? (
-                  <div className="skeleton mt-3 h-9 w-24" />
-                ) : (
-                  <b className="mt-2 block text-3xl font-bold text-slate-900">{value.toLocaleString('es-AR')}</b>
-                )}
-              </div>
-              <span className={`metric-icon ${tone}`}>
-                <Icon size={20} />
-              </span>
-            </div>
-            <p className="mt-4 flex items-center gap-1.5 text-xs font-medium text-slate-400">
-              <CheckCircle2 size={14} className="text-emerald-500" />
-              {hint}
-            </p>
-          </article>
-        ))}
+        <Metric
+          label="Ventas de hoy"
+          value={money(s?.todaySales ?? 0)}
+          icon={<TrendingUp />}
+          hint={
+            s?.comparison == null
+              ? 'Sin base ayer'
+              : `${s.comparison >= 0 ? '+' : ''}${s.comparison.toFixed(1)}% vs. ayer`
+          }
+          positive={(s?.comparison ?? 0) >= 0}
+        />
+        <Metric
+          label="Ventas del mes"
+          value={money(s?.monthSales ?? 0)}
+          icon={<CalendarDays />}
+          hint={`Ganancia estimada ${money(s?.estimatedProfit ?? 0)}`}
+        />
+        <Metric
+          label="Tickets hoy"
+          value={String(s?.ticketsToday ?? 0)}
+          icon={<ReceiptText />}
+          hint={`Promedio ${money(s?.averageTicket ?? 0)}`}
+        />
+        <Metric
+          label="Alertas de stock"
+          value={String((s?.lowStock ?? 0) + (s?.outOfStock ?? 0))}
+          icon={<PackageX />}
+          hint={`${s?.outOfStock ?? 0} sin stock`}
+        />
       </section>
-      <section className="grid gap-5 xl:grid-cols-[1.35fr_.85fr]">
-        <article className="card p-5 sm:p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-bold">Calidad del catálogo</h2>
-              <p className="mt-1 text-sm text-slate-500">Completitud de los datos necesarios para operar.</p>
-            </div>
-            <FolderTree className="text-brand-500" />
+      <section className="grid gap-5 xl:grid-cols-[1.4fr_.8fr]">
+        <article className="card p-6">
+          <h2 className="font-bold">Ventas últimos 7 días</h2>
+          <div className="mt-6 flex h-52 items-end gap-3">
+            {s?.daily.map((x) => (
+              <div className="flex flex-1 flex-col items-center gap-2" key={x.date}>
+                <b className="text-xs">{money(x.total)}</b>
+                <div
+                  className="w-full rounded-t-lg bg-brand-500"
+                  style={{ height: `${Math.max(4, (x.total / max) * 150)}px` }}
+                />
+                <small>{new Date(x.date + 'T12:00').toLocaleDateString('es-AR', { weekday: 'short' })}</small>
+              </div>
+            ))}
           </div>
-          <div className="mt-7 space-y-6">
-            {quality.map(([label, current, total]) => {
-              const percent = total ? Math.max(0, Math.min(100, Math.round((current / total) * 100))) : 0;
-              return (
-                <div key={label}>
-                  <div className="mb-2 flex justify-between text-sm">
-                    <span className="font-medium">{label}</span>
-                    <b>{percent}%</b>
-                  </div>
-                  <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-600 transition-all"
-                      style={{ width: `${percent}%` }}
-                    />
-                  </div>
-                  <p className="mt-1.5 text-xs text-slate-400">
-                    {Math.max(0, current).toLocaleString('es-AR')} de {(total ?? 0).toLocaleString('es-AR')} productos
-                  </p>
-                </div>
-              );
-            })}
+        </article>
+        <article className="card p-6">
+          <h2 className="font-bold">Alertas importantes</h2>
+          <div className="mt-4 space-y-3">
+            <Alert label="Stock bajo" value={s?.lowStock} />
+            <Alert label="Sin stock" value={s?.outOfStock} />
+            <Alert label="Vencen en 30 días" value={s?.expiring} />
+            <Alert label="Margen menor al 10%" value={s?.lowMargin} />
           </div>
+        </article>
+      </section>
+      <section className="grid gap-5 xl:grid-cols-2">
+        <article className="card overflow-hidden">
+          <div className="border-b p-5">
+            <h2 className="font-bold">Productos más vendidos del mes</h2>
+          </div>
+          {s?.topProducts?.length ? (
+            s.topProducts.map((x, i) => (
+              <div className="flex items-center gap-4 border-b px-5 py-3" key={x.productId}>
+                <b className="text-brand-600">#{i + 1}</b>
+                <span className="flex-1">{x.productNameSnapshot}</span>
+                <strong>{Number(x._sum.quantity).toLocaleString('es-AR')} u.</strong>
+              </div>
+            ))
+          ) : (
+            <p className="empty-state">Todavía no hay ventas este mes.</p>
+          )}
         </article>
         <article className="card overflow-hidden">
           <div className="border-b p-5">
-            <h2 className="font-bold">Requieren atención</h2>
-            <p className="mt-1 text-sm text-slate-500">Pendientes de configuración comercial.</p>
+            <h2 className="font-bold">Últimas ventas</h2>
           </div>
-          <div>
-            {alerts.map(([label, value, to]) => (
+          {s?.recentSales?.length ? (
+            s.recentSales.map((x) => (
               <a
-                href={appPath(String(to))}
-                className="flex items-center gap-3 border-b px-5 py-4 transition hover:bg-slate-50"
-                key={label}
+                className="flex items-center gap-4 border-b px-5 py-3 hover:bg-slate-50"
+                href={`/pos/admin/sales/${x.id}`}
+                key={x.id}
               >
-                <span
-                  className={`grid h-9 w-9 place-items-center rounded-lg ${Number(value) > 0 ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}
-                >
-                  {Number(value) > 0 ? <AlertTriangle size={17} /> : <CheckCircle2 size={17} />}
+                <ShoppingBag size={18} />
+                <span className="flex-1">
+                  <b>{x.saleNumber}</b>
+                  <small className="block text-slate-500">
+                    {new Date(x.completedAt).toLocaleTimeString('es-AR')} · {x.user?.firstName ?? 'Cajero'}
+                  </small>
                 </span>
-                <span className="flex-1 text-sm font-medium">{label}</span>
-                <b>{value ?? '—'}</b>
-                <ArrowRight size={15} className="text-slate-300" />
+                <strong>{money(Number(x.total))}</strong>
               </a>
-            ))}
-          </div>
-          <div className="bg-slate-50 px-5 py-4 text-sm">
-            <span className="text-slate-500">Precios modificados hoy</span>
-            <b className="float-right text-brand-600">{s?.pricesChangedToday ?? '—'}</b>
-          </div>
+            ))
+          ) : (
+            <p className="empty-state">Sin ventas recientes.</p>
+          )}
         </article>
       </section>
-      {s?.productsWithoutBranchConfig ? (
-        <div className="flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
-          <Tags size={20} />
-          <b>{s.productsWithoutBranchConfig}</b> productos todavía no tienen configuración por sucursal.
+    </div>
+  );
+}
+function Metric({
+  label,
+  value,
+  icon,
+  hint,
+  positive = true,
+}: {
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+  hint: string;
+  positive?: boolean;
+}) {
+  return (
+    <article className="metric-card">
+      <div className="flex justify-between">
+        <div>
+          <p className="text-sm text-slate-500">{label}</p>
+          <b className="mt-2 block text-3xl">{value}</b>
         </div>
-      ) : null}
+        <span className="metric-icon bg-blue-50 text-brand-600">{icon}</span>
+      </div>
+      <p className={`mt-4 flex gap-1 text-xs ${positive ? 'text-emerald-600' : 'text-red-600'}`}>
+        {positive ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />} {hint}
+      </p>
+    </article>
+  );
+}
+function Alert({ label, value }: { label: string; value?: number }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+      <AlertTriangle size={17} />
+      <span className="flex-1">{label}</span>
+      <b>{value ?? '—'}</b>
     </div>
   );
 }

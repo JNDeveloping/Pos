@@ -65,6 +65,17 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
   });
   const branch = branches.find((item) => item.id === branchId) ?? branches[0];
   const settings = loadPosSettings(branch?.id);
+  const appearance = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('system-preferences') ?? '{}') as {
+        background?: string;
+        backgroundOpacity?: number;
+        backgroundBlur?: number;
+      };
+    } catch {
+      return {};
+    }
+  })();
   const selected = cart.find((line) => line.id === selectedId);
   const subtotal = useMemo(() => cart.reduce((sum, line) => sum + linePrice(line) * line.quantity, 0), [cart]);
   const total = useMemo(() => cart.reduce((sum, line) => sum + lineSubtotal(line), 0), [cart]);
@@ -272,7 +283,18 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
       />
     );
   return (
-    <div className={`pos-shell pos-mode-${settings.mode}`}>
+    <div
+      className={`pos-shell pos-mode-${settings.mode} ${appearance.background ? 'pos-has-background' : ''}`}
+      style={
+        appearance.background
+          ? ({
+              '--pos-background': `url(${appearance.background})`,
+              '--pos-overlay': String((appearance.backgroundOpacity ?? 20) / 100),
+              '--pos-blur': `${appearance.backgroundBlur ?? 0}px`,
+            } as React.CSSProperties)
+          : undefined
+      }
+    >
       <header className="pos-header">
         <div>
           <b>EL RINCÓN POS</b>

@@ -69,6 +69,14 @@ export function Users() {
           Nuevo usuario
         </button>
       </header>
+      <nav className="flex gap-2 border-b">
+        <a className="product-subtab active" href="/pos/users">
+          Usuarios
+        </a>
+        <a className="product-subtab" href="/pos/roles">
+          Roles y permisos
+        </a>
+      </nav>
       {error && <p className="rounded-xl bg-red-50 p-4 text-red-700">{error}</p>}
       {open && (
         <form className="card grid gap-3 p-5 md:grid-cols-2" onSubmit={create}>

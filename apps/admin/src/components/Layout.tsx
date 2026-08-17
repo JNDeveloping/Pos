@@ -5,12 +5,8 @@ import {
   Boxes,
   Building2,
   ChevronRight,
-  CircleDollarSign,
-  DollarSign,
   FileText,
-  FolderTree,
   LayoutDashboard,
-  LibraryBig,
   LogOut,
   Menu,
   PackageSearch,
@@ -19,18 +15,9 @@ import {
   Printer,
   Search,
   Settings,
-  ShieldCheck,
   ShoppingCart,
-  Tags,
   Truck,
-  ArrowRightLeft,
-  ClipboardCheck,
-  History,
-  PackageX,
   AlertTriangle,
-  CreditCard,
-  Monitor,
-  ReceiptText,
   Store,
   Users,
   X,
@@ -44,58 +31,16 @@ import { clearTokens } from '../lib/auth-session';
 type NavItem = readonly [string, string, LucideIcon, string];
 const groups: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = [
   {
-    label: 'GENERAL',
+    label: 'OPERACIÓN',
     items: [
       ['/admin', 'Inicio', LayoutDashboard, 'dashboard.view'],
-      ['/', 'Abrir POS', Store, 'sales.access'],
-    ],
-  },
-  {
-    label: 'VENTAS',
-    items: [
-      ['/admin/sales', 'Ventas', ReceiptText, 'sales.view'],
-      ['/admin/payment-methods', 'Métodos de pago', CreditCard, 'paymentMethods.view'],
-      ['/admin/terminals', 'Terminales', Monitor, 'terminals.view'],
-      ['/admin/pos-settings', 'Configurar POS', Settings, 'terminals.manage'],
-    ],
-  },
-  {
-    label: 'GESTIÓN',
-    items: [
       ['/products', 'Productos', PackageSearch, 'products.view'],
-      ['/catalog', 'Catálogo maestro', LibraryBig, 'products.view'],
-      ['/categories', 'Categorías', FolderTree, 'categories.view'],
-      ['/brands', 'Marcas', Tags, 'brands.view'],
-    ],
-  },
-  {
-    label: 'INVENTARIO',
-    items: [
       ['/admin/stock', 'Stock', Boxes, 'stock.view'],
-      ['/admin/stock/movements', 'Movimientos', History, 'stock.movements'],
-      ['/admin/inventory', 'Inventarios', ClipboardCheck, 'inventory.view'],
-      ['/admin/waste', 'Mermas', PackageX, 'waste.view'],
       ['/admin/expirations', 'Vencimientos', AlertTriangle, 'expirations.view'],
-      ['/admin/transfers', 'Transferencias', ArrowRightLeft, 'transfers.view'],
-    ],
-  },
-  {
-    label: 'COMPRAS',
-    items: [
-      ['/admin/suppliers', 'Proveedores', Truck, 'suppliers.view'],
-      ['/admin/purchase-orders', 'Órdenes de compra', FileText, 'purchaseOrders.view'],
       ['/admin/purchases', 'Compras', ShoppingCart, 'purchases.view'],
-      ['/admin/invoices', 'Facturas', FileText, 'invoices.view'],
-      ['/admin/invoices/analyze', 'Analizar factura', Search, 'invoices.analyze'],
-    ],
-  },
-  {
-    label: 'COMERCIAL',
-    items: [
-      ['/prices', 'Precios', DollarSign, 'prices.view'],
-      ['/costs', 'Costos', CircleDollarSign, 'costs.view'],
-      ['/price-lists', 'Listas de precios', Tags, 'priceLists.view'],
+      ['/admin/suppliers', 'Proveedores', Truck, 'suppliers.view'],
       ['/labels', 'Etiquetas', Printer, 'labels.view'],
+      ['/', 'Abrir POS', Store, 'sales.access'],
     ],
   },
   {
@@ -103,7 +48,6 @@ const groups: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = [
     items: [
       ['/branches', 'Sucursales', Building2, 'branches.view'],
       ['/users', 'Usuarios', Users, 'users.view'],
-      ['/roles', 'Roles y permisos', ShieldCheck, 'roles.view'],
       ['/audit', 'Auditoría', FileText, 'audit.view'],
       ['/settings', 'Configuración', Settings, 'branches.settings'],
     ],

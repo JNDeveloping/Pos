@@ -53,6 +53,7 @@ class ProductDto {
   @IsUUID() categoryId!: string;
   @IsOptional() @IsUUID() subcategoryId?: string;
   @IsOptional() @IsUUID() brandId?: string;
+  @IsOptional() @IsUUID() familyId?: string;
   @IsOptional() @IsString() description?: string;
   @IsEnum(UnitType) unitType: UnitType = UnitType.UNIT;
   @IsNumberString() taxRate = '21';
@@ -77,6 +78,7 @@ class ProductPatchDto {
   @IsOptional() @IsUUID() categoryId?: string;
   @IsOptional() @IsUUID() subcategoryId?: string;
   @IsOptional() @IsUUID() brandId?: string;
+  @IsOptional() @IsUUID() familyId?: string;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsEnum(UnitType) unitType?: UnitType;
   @IsOptional() @IsNumberString() taxRate?: string;
@@ -157,6 +159,8 @@ class ProductsController {
     category: true,
     subcategory: true,
     brand: true,
+    family: true,
+    supplierProducts: { include: { supplier: true }, orderBy: { preferredSupplier: 'desc' } },
     barcodes: true,
     branchConfigs: { include: { branch: true } },
     _count: { select: { branchConfigs: { where: { enabled: true } } } },
@@ -197,6 +201,16 @@ class ProductsController {
               { sku: { contains: q.search, mode: 'insensitive' } },
               { internalCode: { contains: q.search, mode: 'insensitive' } },
               { barcodes: { some: { barcode: { contains: q.search } } } },
+              {
+                supplierProducts: {
+                  some: {
+                    OR: [
+                      { supplierCode: { contains: q.search, mode: 'insensitive' } },
+                      { supplierBarcode: { contains: q.search } },
+                    ],
+                  },
+                },
+              },
             ],
           }
         : {}),
@@ -219,6 +233,29 @@ class ProductsController {
           branchConfigs: product.branchConfigs.map(({ cost: _cost, ...config }) => config),
         }));
     return { data: safeData, meta: { page: q.page, limit: q.limit, total, pages: Math.ceil(total / q.limit) } };
+  }
+  @Post('bulk-disable') @RequirePermissions('products.disable') async bulkDisable(
+    @CurrentSession() s: Session,
+    @Body('productIds') productIds: string[],
+  ) {
+    if (!Array.isArray(productIds) || !productIds.length || productIds.length > 1000)
+      throw new BadRequestException('Selección inválida');
+    const now = new Date();
+    const result = await this.db.product.updateMany({
+      where: { companyId: s.companyId, id: { in: productIds }, deletedAt: null },
+      data: { active: false, deletedAt: now },
+    });
+    await this.db.auditLog.create({
+      data: {
+        companyId: s.companyId,
+        userId: s.sub,
+        entityType: 'PRODUCT',
+        entityId: s.companyId,
+        action: 'PRODUCTS_BULK_DISABLED',
+        metadata: { count: result.count },
+      },
+    });
+    return result;
   }
   @Get(':id') @RequirePermissions('products.view') async one(@CurrentSession() s: Session, @Param('id') id: string) {
     const p = await this.db.product.findFirst({
@@ -872,5 +909,33 @@ class ProductsController {
     if (conflict) throw new BadRequestException('El código de barras ya pertenece a otro producto');
   }
 }
-@Module({ controllers: [ProductsController] })
+class FamilyDto {
+  @IsString() @Length(2, 100) name!: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsBoolean() active?: boolean;
+}
+@Controller('product-families')
+class ProductFamiliesController {
+  constructor(private db: PrismaService) {}
+  @Get() @RequirePermissions('products.view') list(@CurrentSession() s: Session) {
+    return this.db.productFamily.findMany({
+      where: { companyId: s.companyId },
+      include: { _count: { select: { products: true } } },
+      orderBy: { name: 'asc' },
+    });
+  }
+  @Post() @RequirePermissions('products.update') create(@CurrentSession() s: Session, @Body() d: FamilyDto) {
+    return this.db.productFamily.create({ data: { companyId: s.companyId, ...d } });
+  }
+  @Patch(':id') @RequirePermissions('products.update') async update(
+    @CurrentSession() s: Session,
+    @Param('id') id: string,
+    @Body() d: FamilyDto,
+  ) {
+    const found = await this.db.productFamily.findFirst({ where: { id, companyId: s.companyId } });
+    if (!found) throw new NotFoundException('Familia no encontrada');
+    return this.db.productFamily.update({ where: { id }, data: d });
+  }
+}
+@Module({ controllers: [ProductsController, ProductFamiliesController] })
 export class ProductsModule {}
