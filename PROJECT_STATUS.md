@@ -24,8 +24,9 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 - **Autenticación/RBAC:** login, refresh/logout, sesión, roles, permisos, alcance de sucursal y protecciones del último
   superadministrador. Roles está integrado por tab/redirección en Usuarios, aunque conserva pantallas/rutas legadas.
-- **Inicio:** ventas hoy/ayer/mes, tickets, promedio, ganancia estimada, stock bajo/sin stock, vencimientos, bajo margen,
-  top productos, ventas recientes y medios de pago. Faltan compras recomendadas, baja rotación y alertas accionables.
+- **Inicio:** ventas hoy/ayer/mes, tickets, promedio, ganancia y margen estimados, unidades vendidas, stock,
+  vencimientos, bajo margen, top productos, ventas recientes, medios de pago y gráficos de 7/30 días y por hora. Faltan
+  compras recomendadas y productos de baja rotación.
 - **Productos:** catálogo paginado, alta transaccional con barcode/configuración, edición detallada, barcodes, categorías,
   marca opcional, familia, configuración comercial por sucursal, import/export, cambios masivos comerciales, historiales
   y etiquetas básicas. Faltan completar varias acciones masivas y consolidar en una sola UX stock/proveedores/lotes.
@@ -66,6 +67,8 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 # Últimos cambios
 
+- 2026-08-30: identidad visual verde/negra; Dashboard ampliado con métricas, filtros y gráficos automáticos; acceso
+  directo autorizado del POS al panel; `SUPER_ADMIN` recupera acceso a Configuración y la API valida el tenant/sucursal.
 - 2026-08-17: auditoría integral del repositorio; se crean esta guía permanente y el estado vivo, sin iniciar módulos.
 - Commits previos consolidaron navegación/dashboard/productos, reconstruyeron el POS y centralizaron configuración,
   redirects y etiquetas de auditoría.
@@ -93,8 +96,6 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 - README y documentos de etapas conservan afirmaciones históricas ya superadas (por ejemplo “sin ventas/stock” o
   “no crea stock”); usar schema/código y este archivo como estado actual.
-- `GET/PUT /settings?branchId=` no evidencia validación explícita de pertenencia/alcance de la sucursal antes del acceso;
-  debe revisarse como riesgo multi-tenant antes de ampliar Configuración.
 - Fechas del Dashboard se cortan con zona horaria del proceso/UTC y no aplican explícitamente
   `America/Argentina/Buenos_Aires`; los límites diarios pueden ser incorrectos en producción.
 - La búsqueda global del layout es sólo visual. Algunas rutas/componentes legados siguen presentes aunque haya redirects.

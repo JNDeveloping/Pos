@@ -95,7 +95,7 @@ export function RoleDetail({ id }: { id: string }) {
           </button>
         ))}
       </div>
-      {message && <div className="rounded-xl bg-blue-50 p-4 text-sm text-blue-800">{message}</div>}
+      {message && <div className="rounded-xl bg-brand-50 p-4 text-sm text-brand-700">{message}</div>}
       {tab === 'PERMISOS' && (
         <>
           <div className="card flex flex-wrap items-center gap-3 p-4">

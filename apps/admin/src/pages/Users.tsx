@@ -125,7 +125,7 @@ export function Users() {
                   <td>{u.username}</td>
                   <td>{u.roles.map((r) => r.role.name).join(', ') || 'Sin rol'}</td>
                   <td>
-                    <span title={[...effective].join('\n')} className="badge bg-blue-50 text-blue-700">
+                    <span title={[...effective].join('\n')} className="badge bg-brand-50 text-brand-700">
                       {u.roles.some((x) => x.role.code === 'SUPER_ADMIN') ? 'Todos' : effective.size}
                     </span>
                   </td>

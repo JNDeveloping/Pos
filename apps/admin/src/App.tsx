@@ -235,7 +235,7 @@ export default function App() {
     <PurchaseDetail id={purchaseMatch[1]} />
   ) : saleMatch ? (
     <SaleDetail id={saleMatch[1]} me={me} />
-  ) : route === '/settings' && !me.permissions.includes('branches.settings') ? (
+  ) : route === '/settings' && !hasPermission(me, 'branches.settings') ? (
     <div className="card p-6">No tenés permiso para configurar este dispositivo.</div>
   ) : (
     (pages[route] ?? pages['/admin'])

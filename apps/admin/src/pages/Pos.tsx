@@ -25,6 +25,7 @@ import {
 } from '../lib/pos-cart';
 import type { Branch } from './Branches';
 import { loadPosSettings } from '../lib/pos-settings';
+import { appPath } from '../lib/navigation';
 
 type Method = { id: string; code: string; name: string; requiresReference: boolean; active?: boolean };
 type Terminal = { id: string; name: string; code: string; branchId: string; active?: boolean };
@@ -316,7 +317,7 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
           <button title="Pantalla completa" onClick={() => void document.documentElement.requestFullscreen()}>
             <Expand size={18} />
           </button>
-          <a href="/pos/admin">Administración</a>
+          {hasPermission(me, 'dashboard.view') && <a href={appPath('/admin')}>Panel administrativo</a>}
         </div>
       </header>
       <main className="pos-grid">

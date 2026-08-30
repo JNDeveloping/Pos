@@ -30,8 +30,8 @@ type Preferences = {
 };
 const defaults: Preferences = {
   systemName: 'El Rincón de los Nietos',
-  primaryColor: '#2563eb',
-  secondaryColor: '#1e40af',
+  primaryColor: '#16a34a',
+  secondaryColor: '#166534',
   backgroundOpacity: 20,
   backgroundBlur: 0,
   defaultTax: 21,

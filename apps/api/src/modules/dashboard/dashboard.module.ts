@@ -8,13 +8,15 @@ class DashboardController {
   @Get('summary') @RequirePermissions('dashboard.view') async summary(
     @CurrentSession() s: Session,
     @Query('branchId') requested?: string,
+    @Query('days') requestedDays?: string,
   ) {
     const branchId = s.branchId ?? requested,
+      days = requestedDays === '30' ? 30 : 7,
       now = new Date(),
       today = new Date(now.getFullYear(), now.getMonth(), now.getDate()),
       yesterday = new Date(today.getTime() - 86400000),
       month = new Date(now.getFullYear(), now.getMonth(), 1),
-      week = new Date(today.getTime() - 6 * 86400000);
+      periodStart = new Date(today.getTime() - (days - 1) * 86400000);
     const saleWhere = {
       companyId: s.companyId,
       status: { in: [SaleStatus.COMPLETED, SaleStatus.PARTIALLY_REFUNDED] },
@@ -32,6 +34,8 @@ class DashboardController {
       recentSales,
       sevenDays,
       paymentGroups,
+      todayItems,
+      monthItems,
     ] = await Promise.all([
       this.db.sale.aggregate({
         where: { ...saleWhere, completedAt: { gte: today } },
@@ -91,7 +95,7 @@ class DashboardController {
         take: 6,
       }),
       this.db.sale.findMany({
-        where: { ...saleWhere, completedAt: { gte: week } },
+        where: { ...saleWhere, completedAt: { gte: periodStart } },
         select: { completedAt: true, total: true },
       }),
       this.db.payment.groupBy({
@@ -99,14 +103,22 @@ class DashboardController {
         where: { sale: { ...saleWhere, completedAt: { gte: month } } },
         _sum: { amount: true },
       }),
+      this.db.saleItem.aggregate({
+        where: { sale: { ...saleWhere, completedAt: { gte: today } } },
+        _sum: { quantity: true },
+      }),
+      this.db.saleItem.aggregate({
+        where: { sale: { ...saleWhere, completedAt: { gte: month } } },
+        _sum: { quantity: true },
+      }),
     ]);
     const methodIds = paymentGroups.map((x) => x.paymentMethodId),
       methods = await this.db.paymentMethod.findMany({
         where: { id: { in: methodIds } },
         select: { id: true, name: true },
       }),
-      daily = Array.from({ length: 7 }, (_, i) => {
-        const date = new Date(week.getTime() + i * 86400000),
+      daily = Array.from({ length: days }, (_, i) => {
+        const date = new Date(periodStart.getTime() + i * 86400000),
           key = date.toISOString().slice(0, 10);
         return {
           date: key,
@@ -114,7 +126,14 @@ class DashboardController {
             .filter((x) => x.completedAt?.toISOString().slice(0, 10) === key)
             .reduce((n, x) => n + Number(x.total), 0),
         };
-      });
+      }),
+      hourly = Array.from({ length: 24 }, (_, hour) => ({
+        hour,
+        total: sevenDays
+          .filter((sale) => sale.completedAt?.getHours() === hour)
+          .reduce((total, sale) => total + Number(sale.total), 0),
+        tickets: sevenDays.filter((sale) => sale.completedAt?.getHours() === hour).length,
+      }));
     const stockMap = new Map(
       stocksForLow.map((row) => [
         `${row.branchId}:${row.productId}`,
@@ -137,6 +156,11 @@ class DashboardController {
       ticketsToday: todaySales._count,
       averageTicket: todaySales._count ? todayTotal / todaySales._count : 0,
       estimatedProfit: monthTotal - Number(monthSales._sum.costTotal ?? 0),
+      grossMargin: monthTotal
+        ? ((monthTotal - Number(monthSales._sum.costTotal ?? 0)) / monthTotal) * 100
+        : 0,
+      productsToday: Number(todayItems._sum.quantity ?? 0),
+      productsMonth: Number(monthItems._sum.quantity ?? 0),
       lowStock,
       outOfStock,
       expiring,
@@ -144,6 +168,8 @@ class DashboardController {
       topProducts,
       recentSales,
       daily,
+      hourly,
+      periodDays: days,
       paymentMethods: paymentGroups.map((x) => ({
         name: methods.find((m) => m.id === x.paymentMethodId)?.name ?? 'Otro',
         total: Number(x._sum.amount ?? 0),

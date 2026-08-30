@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Module, Put, Query } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Module, NotFoundException, Put, Query } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CurrentSession, RequirePermissions, Session } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
@@ -10,12 +10,22 @@ class CompanyController {
   }
 }
 @Controller('settings')
-class SettingsController {
+export class SettingsController {
   constructor(private db: PrismaService) {}
+  private async validateBranch(s: Session, branchId?: string) {
+    if (!branchId) return;
+    if (s.branchId && s.branchId !== branchId) throw new ForbiddenException('No puede configurar otra sucursal');
+    const branch = await this.db.branch.findFirst({
+      where: { id: branchId, companyId: s.companyId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!branch) throw new NotFoundException('Sucursal no encontrada');
+  }
   @Get() @RequirePermissions('branches.settings') async get(
     @CurrentSession() s: Session,
     @Query('branchId') branchId?: string,
   ) {
+    await this.validateBranch(s, branchId);
     const [company, branch] = await Promise.all([
       this.db.companySetting.findMany({ where: { companyId: s.companyId } }),
       branchId ? this.db.branchSetting.findMany({ where: { companyId: s.companyId, branchId } }) : [],
@@ -27,6 +37,7 @@ class SettingsController {
     @Query('branchId') branchId: string | undefined,
     @Body() body: Record<string, unknown>,
   ) {
+    await this.validateBranch(s, branchId);
     return this.db.$transaction(async (tx) => {
       for (const [key, value] of Object.entries(body)) {
         if (branchId)
