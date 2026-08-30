@@ -472,6 +472,8 @@ type PosProduct = {
   internalCode: string;
   barcode?: string;
   brand?: string;
+  categoryId: string;
+  category: string;
   presentation?: string;
   unitType: string;
   price: Prisma.Decimal;
@@ -502,7 +504,7 @@ export class PosCatalogService {
     const branch = await this.branch(s, branchId);
     const products = await this.db.product.findMany({
       where: { companyId: s.companyId, deletedAt: null, ...where },
-      include: { brand: true, barcodes: true, branchConfigs: { where: { branchId } } },
+      include: { brand: true, category: true, barcodes: true, branchConfigs: { where: { branchId } } },
       orderBy: { name: 'asc' },
       take: exactLabel ? 2 : 30,
     });
@@ -535,6 +537,8 @@ export class PosCatalogService {
           internalCode: product.internalCode,
           barcode: product.barcodes.find((barcode) => barcode.isPrimary)?.barcode ?? product.barcodes[0]?.barcode,
           brand: product.brand?.name,
+          categoryId: product.categoryId,
+          category: product.category.name,
           presentation: product.presentationType ?? undefined,
           unitType: product.unitType,
           price: priceByProduct.get(product.id) ?? config.salePrice,
@@ -590,6 +594,26 @@ export class PosCatalogService {
   favorites(s: Session, branchId: string) {
     return this.resolve(s, branchId, { branchConfigs: { some: { branchId, enabled: true, posFavorite: true } } });
   }
+
+  async quickGroups(s: Session, branchId: string) {
+    await this.branch(s, branchId);
+    return this.db.category.findMany({
+      where: {
+        companyId: s.companyId,
+        active: true,
+        deletedAt: null,
+        products: { some: { active: true, deletedAt: null, branchConfigs: { some: { branchId, enabled: true } } } },
+      },
+      select: { id: true, name: true },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      take: 16,
+    });
+  }
+
+  category(s: Session, branchId: string, categoryId: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(categoryId)) throw new BadRequestException('Categoría inválida');
+    return this.resolve(s, branchId, { categoryId });
+  }
 }
 
 @Controller('pos/products')
@@ -614,6 +638,19 @@ class PosController {
     @Query('branchId') branchId: string,
   ) {
     return this.catalog.favorites(s, branchId);
+  }
+  @Get('quick-groups') @RequirePermissions('sales.access') quickGroups(
+    @CurrentSession() s: Session,
+    @Query('branchId') branchId: string,
+  ) {
+    return this.catalog.quickGroups(s, branchId);
+  }
+  @Get('category/:categoryId') @RequirePermissions('sales.access') category(
+    @CurrentSession() s: Session,
+    @Param('categoryId') categoryId: string,
+    @Query('branchId') branchId: string,
+  ) {
+    return this.catalog.category(s, branchId, categoryId);
   }
 }
 @Controller('sales')

@@ -3,7 +3,9 @@ import {
   Banknote,
   Barcode,
   Calculator,
+  ChevronRight,
   Expand,
+  LayoutDashboard,
   Minus,
   Pause,
   Plus,
@@ -14,7 +16,7 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
-import { api, hasPermission, type Me } from '../lib/api';
+import { api, hasAnyPermission, hasPermission, hasRole, type Me } from '../lib/api';
 import {
   addProductToCart,
   linePrice,
@@ -29,17 +31,30 @@ import { appPath } from '../lib/navigation';
 
 type Method = { id: string; code: string; name: string; requiresReference: boolean; active?: boolean };
 type Terminal = { id: string; name: string; code: string; branchId: string; active?: boolean };
+type QuickGroup = { id: string; name: string };
 type Suspended = { id: string; at: string; cart: CartLine[] };
 type Modal = 'help' | 'search' | 'edit' | 'discount' | 'suspended' | 'utilities' | 'payment' | null;
 const money = (value: number) => value.toLocaleString('es-AR', { style: 'currency', currency: 'ARS' });
 const quantity = (line: CartLine) =>
   line.isWeighted ? `${line.quantity.toLocaleString('es-AR', { minimumFractionDigits: 3 })} kg` : String(line.quantity);
+const quickIcon = (name: string) => {
+  const normalized = name.toLocaleLowerCase('es-AR');
+  if (normalized.includes('pan')) return '🥖';
+  if (normalized.includes('frut') || normalized.includes('verd')) return '🍎';
+  if (normalized.includes('carb')) return '🔥';
+  if (normalized.includes('beb')) return '🥤';
+  if (normalized.includes('láct') || normalized.includes('lact')) return '🥛';
+  return '◉';
+};
 
 export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; branchId?: string }) {
   const scanner = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PosProduct[]>([]);
   const [favorites, setFavorites] = useState<PosProduct[]>([]);
+  const [quickGroups, setQuickGroups] = useState<QuickGroup[]>([]);
+  const [quickProducts, setQuickProducts] = useState<PosProduct[]>([]);
+  const [activeQuickGroup, setActiveQuickGroup] = useState('favorites');
   const [cart, setCart] = useState<CartLine[]>(() => {
     try {
       return JSON.parse(sessionStorage.getItem('pos-cart') ?? '[]') as CartLine[];
@@ -65,6 +80,17 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
     }
   });
   const branch = branches.find((item) => item.id === branchId) ?? branches[0];
+  const canOpenAdmin =
+    hasRole(me, 'SUPER_ADMIN') ||
+    hasAnyPermission(me, [
+      'dashboard.view',
+      'products.view',
+      'stock.view',
+      'purchases.view',
+      'suppliers.view',
+      'users.view',
+      'branches.settings',
+    ]);
   const settings = loadPosSettings(branch?.id);
   const appearance = (() => {
     try {
@@ -89,8 +115,9 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
       api<Method[]>('/payment-methods'),
       api<Terminal[]>('/terminals'),
       api<PosProduct[]>(`/pos/products/favorites?branchId=${branch.id}`),
+      api<QuickGroup[]>(`/pos/products/quick-groups?branchId=${branch.id}`),
     ])
-      .then(([paymentMethods, availableTerminals, favoriteProducts]) => {
+      .then(([paymentMethods, availableTerminals, favoriteProducts, groups]) => {
         setMethods(paymentMethods.filter((item) => item.active !== false));
         const branchTerminals = availableTerminals.filter(
           (item) => item.active !== false && item.branchId === branch.id,
@@ -100,6 +127,9 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
           branchTerminals.some((item) => item.id === current) ? current : (branchTerminals[0]?.id ?? ''),
         );
         setFavorites(favoriteProducts);
+        setQuickProducts(favoriteProducts);
+        setQuickGroups(groups);
+        setActiveQuickGroup('favorites');
         setOnline(true);
       })
       .catch((error: Error) => {
@@ -194,6 +224,25 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
     },
     [add, branch],
   );
+
+  const openQuickGroup = async (groupId: string) => {
+    if (!branch || busy) return;
+    setActiveQuickGroup(groupId);
+    if (groupId === 'favorites') {
+      setQuickProducts(favorites);
+      return;
+    }
+    setBusy(true);
+    try {
+      setQuickProducts(
+        await api<PosProduct[]>(`/pos/products/category/${groupId}?branchId=${branch.id}`),
+      );
+    } catch (error) {
+      setMessage({ kind: 'error', text: (error as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const removeSelected = useCallback(() => {
     if (!selectedId) return;
@@ -317,7 +366,11 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
           <button title="Pantalla completa" onClick={() => void document.documentElement.requestFullscreen()}>
             <Expand size={18} />
           </button>
-          {hasPermission(me, 'dashboard.view') && <a href={appPath('/admin')}>Panel administrativo</a>}
+          {canOpenAdmin && (
+            <a className="pos-admin-link" href={appPath('/admin')} title="Abrir centro de administración">
+              <LayoutDashboard size={18} /> <span>ADMIN</span>
+            </a>
+          )}
         </div>
       </header>
       <main className="pos-grid">
@@ -337,19 +390,30 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
             </button>
           </div>
           {message && <div className={`pos-feedback ${message.kind}`}>{message.text}</div>}
-          {!!favorites.length && (
-            <div
-              className="pos-favorites"
-              style={{ gridTemplateColumns: `repeat(${settings.favoriteColumns}, minmax(120px, 1fr))` }}
-              aria-label="Accesos rápidos"
-            >
-              {favorites.map((product) => (
-                <button key={product.id} onClick={() => add(product)}>
-                  <span>{product.shortName || product.name}</span>
-                  <b>{money(Number(product.price))}</b>
+          {(quickGroups.length > 0 || favorites.length > 0) && (
+            <section className="pos-quick-access" aria-label="Accesos rápidos por categoría">
+              <div className="pos-quick-groups">
+                <button className={activeQuickGroup === 'favorites' ? 'active' : ''} onClick={() => void openQuickGroup('favorites')}>
+                  <span>★</span><b>Accesos rápidos</b>
                 </button>
-              ))}
-            </div>
+                {quickGroups.map((group) => (
+                  <button className={activeQuickGroup === group.id ? 'active' : ''} key={group.id} onClick={() => void openQuickGroup(group.id)}>
+                    <span>{quickIcon(group.name)}</span><b>{group.name}</b><ChevronRight size={14} />
+                  </button>
+                ))}
+              </div>
+              {!!quickProducts.length && (
+                <div className="pos-quick-products" style={{ gridTemplateColumns: `repeat(${settings.favoriteColumns}, minmax(130px, 1fr))` }}>
+                  {quickProducts.map((product) => (
+                    <button key={product.id} onClick={() => add(product)}>
+                      <small>{product.category ?? 'Rápido'}</small>
+                      <span>{product.shortName || product.name}</span>
+                      <b>{money(Number(product.price))}</b>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
           )}
           <div className="pos-table-head">
             <span>Producto</span>

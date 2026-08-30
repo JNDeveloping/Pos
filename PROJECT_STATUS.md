@@ -37,9 +37,10 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 - **Stock:** cantidad agregada por producto/sucursal, reservas/tránsito, movimientos, ajustes, inventarios, mermas,
   transferencias entre sucursales, lotes/vencimientos y recepción de compras. Las pantallas operativas secundarias son
   básicas y ahora se acceden principalmente desde Stock.
-- **POS/ventas:** búsqueda y scanner, favoritos, teclado/touch, cantidades decimales, precio/descuento con permiso,
-  pagos, venta idempotente, ticket web, consulta, anulación, devolución y reimpresión auditada. Suspendidos son locales al
-  navegador; no hay caja/arqueos ni autorización por credenciales de un segundo usuario.
+- **POS/ventas:** búsqueda y scanner, accesos rápidos por favoritos y categorías, teclado/touch, cantidades decimales,
+  precio/descuento con permiso, pagos, venta idempotente, ticket web, consulta, anulación, devolución, reimpresión y
+  acceso visible a Admin según RBAC. Suspendidos son locales al navegador; no hay caja/arqueos ni autorización por
+  credenciales de un segundo usuario.
 - **Configuración:** `CompanySetting` y `BranchSetting`, pantalla consolidada y auditoría. Varias pestañas son informativas
   y algunas preferencias del POS todavía se duplican en `localStorage`.
 - **Sucursales/usuarios/auditoría/etiquetas:** CRUD y vistas funcionales iniciales; ficha de sucursal usa tabs, auditoría
@@ -67,6 +68,9 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 # Últimos cambios
 
+- 2026-08-30: el POS incorpora selector rápido de categorías y productos (incluidos Panadería, Frutas o Carbón cuando
+  esas categorías existen), y un botón ADMIN responsivo con bypass de `SUPER_ADMIN`; el panel adopta un centro de
+  operaciones oscuro/verde con navegación y retorno al modo venta más directos.
 - 2026-08-30: se establece como regla permanente que cada entrega incluya pasos completos de actualización productiva
   y recarga de la PWA, señalando migraciones o sincronización de permisos cuando corresponda.
 - 2026-08-30: identidad visual verde/negra; Dashboard ampliado con métricas, filtros y gráficos automáticos; acceso

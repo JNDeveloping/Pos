@@ -57,6 +57,12 @@
 .pos-header a {
   @apply rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold hover:bg-white/10;
 }
+.pos-header .pos-admin-link {
+  @apply flex min-h-11 items-center gap-2 border-brand-500 bg-brand-500 px-4 text-white shadow-lg shadow-black/30 hover:bg-brand-600;
+}
+.pos-header .pos-admin-link span {
+  @apply font-extrabold tracking-wider text-white;
+}
 .pos-grid {
   @apply grid min-h-[calc(100vh-5rem)] lg:grid-cols-[1fr_390px];
 }
@@ -75,14 +81,35 @@
 .pos-feedback {
   @apply rounded-xl bg-brand-50 px-4 py-3 font-semibold text-brand-700;
 }
-.pos-favorites {
-  @apply flex gap-2 overflow-x-auto;
+.pos-quick-access {
+  @apply overflow-hidden rounded-2xl border border-emerald-950/10 bg-white shadow-sm;
 }
-.pos-favorites button {
-  @apply flex min-w-32 flex-col rounded-xl border bg-white p-3 text-left text-sm shadow-sm;
+.pos-quick-groups {
+  @apply flex gap-2 overflow-x-auto border-b bg-slate-950 p-2;
 }
-.pos-favorites b {
-  @apply mt-1 text-brand-700;
+.pos-quick-groups button {
+  @apply flex min-w-max items-center gap-2 rounded-xl px-3 py-2 text-slate-300 hover:bg-white/10 hover:text-white;
+}
+.pos-quick-groups button > span {
+  @apply text-xl;
+}
+.pos-quick-groups button.active {
+  @apply bg-brand-500 text-white;
+}
+.pos-quick-products {
+  @apply grid max-h-52 gap-2 overflow-y-auto p-2;
+}
+.pos-quick-products button {
+  @apply flex min-h-24 flex-col items-start rounded-xl border border-emerald-950/10 bg-[#f4faf6] p-3 text-left shadow-sm hover:-translate-y-0.5 hover:border-brand-500 hover:bg-brand-50;
+}
+.pos-quick-products small {
+  @apply text-[10px] font-bold uppercase tracking-wider text-brand-700;
+}
+.pos-quick-products span {
+  @apply line-clamp-2 flex-1 font-semibold text-slate-900;
+}
+.pos-quick-products b {
+  @apply text-brand-700;
 }
 .pos-lines {
   @apply min-h-72 flex-1 overflow-auto rounded-2xl bg-white shadow-sm ring-1 ring-slate-200;
@@ -221,16 +248,16 @@
 }
 @layer components {
   .app-shell {
-    @apply grid min-h-screen transition-[grid-template-columns] duration-300;
+    @apply grid min-h-screen bg-[#f3f7f4] transition-[grid-template-columns] duration-300;
   }
   .sidebar {
-    @apply sticky top-0 h-screen flex-col overflow-y-auto border-r bg-white p-3 text-slate-700;
+    @apply sticky top-0 h-screen flex-col overflow-y-auto border-r border-emerald-950 bg-[#07130d] p-3 text-white;
   }
   .sidebar-brand {
     @apply mb-3 flex min-h-16 items-center gap-3 px-2;
   }
   .sidebar-brand small {
-    @apply text-xs font-medium text-slate-400;
+    @apply text-xs font-medium uppercase tracking-widest text-emerald-300/70;
   }
   .brand-mark {
     @apply grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-brand-500 to-slate-950 text-white shadow-lg shadow-brand-100;
@@ -242,16 +269,32 @@
     @apply space-y-1;
   }
   .nav-label {
-    @apply mb-1 px-3 text-[10px] font-bold tracking-[.14em] text-slate-400;
+    @apply mb-1 flex items-center gap-2 px-3 text-[10px] font-bold tracking-[.14em] text-emerald-300/50;
+  }
+  .nav-label span {
+    @apply font-mono text-brand-500;
   }
   .nav-item {
-    @apply flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900;
+    @apply flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 hover:bg-white/10 hover:text-white;
   }
   .nav-item-active {
-    @apply bg-brand-50 text-brand-600 hover:bg-brand-50 hover:text-brand-700;
+    @apply bg-brand-500 text-white shadow-lg shadow-emerald-950 hover:bg-brand-600 hover:text-white;
+  }
+  .sidebar-command {
+    @apply mb-2 flex items-center gap-3 rounded-2xl border border-brand-500/30 bg-brand-500/10 p-3 text-brand-50 transition hover:bg-brand-500/20;
+  }
+  .sidebar-command span {
+    @apply min-w-0 flex-1;
+  }
+  .sidebar-command b,
+  .sidebar-command small {
+    @apply block;
+  }
+  .sidebar-command small {
+    @apply text-[10px] text-emerald-300/60;
   }
   .topbar {
-    @apply sticky top-0 z-30 flex min-h-16 items-center gap-3 border-b bg-white/95 px-4 backdrop-blur lg:px-6;
+    @apply sticky top-0 z-30 flex min-h-16 items-center gap-3 border-b border-emerald-950/10 bg-white/90 px-4 shadow-sm backdrop-blur-xl lg:px-6;
   }
   .icon-button {
     @apply relative grid h-10 w-10 place-items-center rounded-lg p-0 text-slate-500 hover:bg-slate-100 hover:text-brand-600;
@@ -284,7 +327,7 @@
     @apply w-full justify-start text-red-600 hover:bg-red-50;
   }
   .context-bar {
-    @apply flex min-h-12 flex-wrap items-center justify-between gap-3 border-b bg-white px-4 text-xs lg:px-7;
+    @apply flex min-h-12 flex-wrap items-center justify-between gap-3 border-b border-emerald-950/10 bg-[#eaf3ed] px-4 text-xs lg:px-7;
   }
   .context-bar > div {
     @apply flex items-center gap-1.5;
@@ -423,6 +466,7 @@
 /* POS profesional: compacto por defecto, táctil en pantallas medianas */
 .pos-head-meta {
   display: flex;
+  flex-direction: row !important;
   align-items: center;
   gap: 1rem;
   font-size: 0.82rem;
@@ -721,7 +765,7 @@
   .shortcut-help {
     grid-template-columns: 1fr;
   }
-  .pos-favorites button {
+  .pos-quick-products button {
     min-height: 76px;
   }
 }
@@ -732,8 +776,11 @@
   .pos-head-meta {
     gap: 0.5rem;
   }
-  .pos-head-meta > a {
+  .pos-head-meta > a span {
     display: none;
+  }
+  .pos-head-meta > a {
+    padding-inline: 0.7rem;
   }
   .pos-lines article {
     grid-template-columns: 1fr auto;
