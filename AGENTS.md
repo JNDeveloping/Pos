@@ -171,6 +171,20 @@ scripts/                      controles de release y limpieza de offline legado
 - Si una prueba depende de PostgreSQL/Redis/credenciales no disponibles, informarlo como limitación; no declarar el
   flujo terminado basándose sólo en mocks.
 
+## Entrega y actualización de la página
+
+- **Toda respuesta final que entregue cambios debe incluir una sección `Pasos para actualizar`**, aunque el cambio sea
+  solamente de frontend. No obligar al usuario a buscar instrucciones en mensajes anteriores.
+- Indicar comandos completos, en orden y listos para copiar, partiendo de la instalación productiva habitual:
+  `cd /var/www/grupolosnietos/pos`, actualizar el código y ejecutar `bash infra/scripts/deploy-production.sh`.
+- Después del script, reiniciar y comprobar la API con `sudo systemctl restart rincon-pos-api`,
+  `sudo systemctl status rincon-pos-api --no-pager` y `curl -fsS http://127.0.0.1:3002/api/health`.
+- Recordar al usuario abrir `https://grupolosnietos.com.ar/pos/`, aceptar el aviso de nueva versión de la PWA si aparece
+  y recargar. Si el navegador conserva una versión anterior, indicar recarga forzada (`Ctrl+Shift+R`).
+- Si la entrega agrega una migración o cambia permisos, destacarlo expresamente. El script aplica migraciones; ejecutar
+  además `npm run permissions:sync` sólo cuando el catálogo de permisos haya cambiado.
+- No sugerir copiar sólo `src`, servir fuentes sin compilar, ejecutar `npm run dev` en producción ni borrar `.env`.
+
 ## No implementar todavía
 
 - IndexedDB como fuente comercial, colas/sincronización offline del navegador, servidor local por sucursal ni
@@ -180,4 +194,3 @@ scripts/                      controles de release y limpieza de offline legado
 - Cuenta corriente de proveedores, fidelización/crédito u otros dominios no solicitados.
 - Secciones principales nuevas para marcas, precios, costos, movimientos, inventarios, mermas, transferencias, órdenes
   o roles.
-

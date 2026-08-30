@@ -67,6 +67,8 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 # Últimos cambios
 
+- 2026-08-30: se establece como regla permanente que cada entrega incluya pasos completos de actualización productiva
+  y recarga de la PWA, señalando migraciones o sincronización de permisos cuando corresponda.
 - 2026-08-30: identidad visual verde/negra; Dashboard ampliado con métricas, filtros y gráficos automáticos; acceso
   directo autorizado del POS al panel; `SUPER_ADMIN` recupera acceso a Configuración y la API valida el tenant/sucursal.
 - 2026-08-17: auditoría integral del repositorio; se crean esta guía permanente y el estado vivo, sin iniciar módulos.
