@@ -107,9 +107,9 @@ scripts/                      controles de release y limpieza de offline legado
 
 ## Stock, lotes y vencimientos
 
-- Objetivo funcional: dos ubicaciones por sucursal, `SALE_FLOOR` (local) y `WAREHOUSE` (depósito); total = ambas.
-  Reponer depósito → local conserva el total y genera trazabilidad. **El esquema actual aún no modela esta separación**:
-  no fingir que está implementada ni reutilizar transferencias entre sucursales como sustituto.
+- El stock usa dos ubicaciones por sucursal, `SALE_FLOOR` (local) y `WAREHOUSE` (depósito); el total agregado debe ser
+  siempre la suma de ambas. Reponer depósito → local debe conservar el total y generar trazabilidad; no reutilizar
+  transferencias entre sucursales como sustituto.
 - Toda variación física pasa por el servicio de stock y crea `StockMovement` atómicamente. No escribir cantidades
   directamente desde controladores/UI.
 - La pantalla debe priorizar sin stock, stock bajo y, cuando existan ubicaciones, local vacío con depósito disponible.

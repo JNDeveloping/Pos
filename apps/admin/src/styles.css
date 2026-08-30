@@ -102,6 +102,8 @@
 .pos-quick-products button {
   @apply flex min-h-24 flex-col items-start rounded-xl border border-emerald-950/10 bg-[#f4faf6] p-3 text-left shadow-sm hover:-translate-y-0.5 hover:border-brand-500 hover:bg-brand-50;
 }
+.pos-quick-products.size-small button { @apply min-h-20; }
+.pos-quick-products.size-large button { @apply min-h-32 text-lg; }
 .pos-quick-products small {
   @apply text-[10px] font-bold uppercase tracking-wider text-brand-700;
 }
@@ -854,7 +856,7 @@
   z-index: -2;
   background-image: var(--pos-background);
   background-size: cover;
-  background-position: center;
+  background-position: var(--pos-background-position, center);
   filter: blur(var(--pos-blur));
   transform: scale(1.03);
 }
@@ -916,4 +918,84 @@
 }
 .payment-bar > span {
   @apply block h-full rounded-full bg-brand-600;
+}
+
+.pos-opening-backdrop {
+  @apply fixed inset-0 z-[120] grid place-items-center bg-slate-950/80 p-4 backdrop-blur-md;
+}
+.pos-opening-card {
+  @apply grid w-full max-w-xl gap-4 rounded-3xl border border-brand-500/30 bg-white p-6 shadow-2xl sm:p-8;
+}
+.pos-opening-card label {
+  @apply grid gap-2 text-sm font-bold text-slate-700;
+}
+.pos-opening-card select,
+.pos-opening-card input {
+  @apply min-h-14 text-lg;
+}
+.pos-open-button {
+  @apply min-h-16 rounded-2xl bg-brand-600 text-lg font-extrabold text-white hover:bg-brand-700;
+}
+.pos-number-pad {
+  @apply grid grid-cols-3 gap-2;
+}
+.pos-number-pad button {
+  @apply min-h-16 rounded-xl bg-slate-950 text-xl font-black text-white active:bg-brand-600;
+}
+.settings-tabs {
+  @apply grid grid-cols-2 gap-2 rounded-2xl bg-slate-950 p-2 sm:grid-cols-3 lg:grid-cols-6;
+}
+.settings-tabs button {
+  @apply min-h-12 text-xs font-bold text-slate-300 hover:bg-white/10 hover:text-white;
+}
+.settings-tabs button.active {
+  @apply bg-brand-500 text-white;
+}
+.settings-panel {
+  @apply grid gap-5 p-5 md:grid-cols-2 md:p-7;
+}
+.settings-panel > label,
+.settings-panel fieldset label {
+  @apply grid gap-2 text-sm font-semibold;
+}
+.setting-help {
+  @apply rounded-2xl bg-[#edf6ef] p-5 text-slate-600 md:col-span-2;
+}
+.setting-upload {
+  @apply cursor-pointer rounded-2xl border-2 border-dashed border-brand-500/40 p-5;
+}
+.pos-background-preview {
+  @apply relative min-h-52 rounded-2xl bg-cover md:col-span-2;
+}
+.pos-background-preview button {
+  @apply absolute right-3 top-3 bg-white shadow;
+}
+.check-field {
+  @apply flex min-h-12 items-center gap-3 rounded-xl bg-slate-50 px-3;
+}
+.quick-group-editor-list {
+  @apply grid gap-2;
+}
+.quick-group-editor-list article {
+  @apply flex items-center gap-3 rounded-2xl border bg-white p-3;
+}
+.quick-group-editor-list article > div {
+  @apply min-w-0 flex-1;
+}
+.quick-group-editor-list small {
+  @apply block text-xs text-slate-500;
+}
+.product-create-sections {
+  @apply mt-6 grid gap-4;
+}
+.product-create-sections fieldset,
+.product-create-sections details {
+  @apply rounded-2xl border border-emerald-950/10 bg-[#f8fbf9] p-4;
+}
+.product-create-sections legend,
+.product-create-sections summary {
+  @apply cursor-pointer px-2 text-lg font-bold text-brand-700;
+}
+.product-create-sections label {
+  @apply grid gap-1.5 text-sm font-semibold;
 }

@@ -45,6 +45,8 @@ class ProductBranchDto {
   @IsOptional() @IsBoolean() allowManualPrice?: boolean;
   @IsOptional() @IsString() location?: string;
   @IsOptional() @IsString() shelf?: string;
+  @IsOptional() @IsNumberString() saleFloorStock?: string;
+  @IsOptional() @IsNumberString() warehouseStock?: string;
 }
 class ProductDto {
   @IsOptional() @IsString() @Length(2, 50) internalCode?: string;
@@ -153,7 +155,7 @@ class ImportBatchDto {
 }
 @ApiTags('Productos')
 @Controller('products')
-class ProductsController {
+export class ProductsController {
   constructor(private db: PrismaService) {}
   private include = {
     category: true,
@@ -257,6 +259,34 @@ class ProductsController {
     });
     return result;
   }
+  @Get('bulk-delete-all/summary') @RequirePermissions('products.disable') async deleteAllSummary(
+    @CurrentSession() s: Session,
+  ) {
+    if (!s.roles.includes('SUPER_ADMIN')) throw new ForbiddenException('Sólo SUPER_ADMIN puede eliminar todo el catálogo');
+    return { count: await this.db.product.count({ where: { companyId: s.companyId, deletedAt: null } }) };
+  }
+  @Post('bulk-delete-all') @RequirePermissions('products.disable') async deleteAll(
+    @CurrentSession() s: Session,
+    @Body('confirmation') confirmation: string,
+  ) {
+    if (!s.roles.includes('SUPER_ADMIN')) throw new ForbiddenException('Sólo SUPER_ADMIN puede eliminar todo el catálogo');
+    if (confirmation !== 'ELIMINAR') throw new BadRequestException('Confirmación inválida');
+    const now = new Date();
+    return this.db.$transaction(async (tx) => {
+      const products = await tx.product.updateMany({
+        where: { companyId: s.companyId, deletedAt: null },
+        data: { active: false, deletedAt: now },
+      });
+      await tx.branchProduct.updateMany({
+        where: { branch: { companyId: s.companyId }, product: { deletedAt: now } },
+        data: { enabled: false },
+      });
+      await tx.auditLog.create({
+        data: { companyId: s.companyId, userId: s.sub, entityType: 'PRODUCT', entityId: s.companyId, action: 'ALL_PRODUCTS_DISABLED', metadata: { count: products.count } },
+      });
+      return { count: products.count };
+    }, { timeout: 60000 });
+  }
   @Get(':id') @RequirePermissions('products.view') async one(@CurrentSession() s: Session, @Param('id') id: string) {
     const p = await this.db.product.findFirst({
       where: { id, companyId: s.companyId, deletedAt: null },
@@ -324,6 +354,18 @@ class ProductsController {
             shelf: branchConfig.shelf,
           },
         });
+        const saleFloor = new Prisma.Decimal(branchConfig.saleFloorStock ?? 0),
+          warehouse = new Prisma.Decimal(branchConfig.warehouseStock ?? 0),
+          total = saleFloor.plus(warehouse);
+        if (saleFloor.lt(0) || warehouse.lt(0)) throw new BadRequestException('El stock inicial no puede ser negativo');
+        if (total.gt(0)) {
+          await tx.stock.create({ data: { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, quantity: total } });
+          await tx.stockLocationBalance.createMany({ data: [
+            { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, location: 'SALE_FLOOR', quantity: saleFloor },
+            { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, location: 'WAREHOUSE', quantity: warehouse },
+          ] });
+          await tx.stockMovement.create({ data: { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, type: 'INITIAL_STOCK', quantity: total, previousQuantity: 0, newQuantity: total, reason: 'Alta de producto', userId: s.sub, metadata: { saleFloor: saleFloor.toString(), warehouse: warehouse.toString() } } });
+        }
       }
       await tx.auditLog.create({
         data: {

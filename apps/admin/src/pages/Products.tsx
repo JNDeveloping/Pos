@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, FileSpreadsheet, PackagePlus, Search, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileSpreadsheet, PackagePlus, Search, Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { branchContext } from '../lib/branch-context';
 import { appPath } from '../lib/navigation';
@@ -35,7 +35,6 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     [page, setPage] = useState(1),
     [show, setShow] = useState(false),
     [categories, setCategories] = useState<Ref[]>([]),
-    [brands, setBrands] = useState<Ref[]>([]),
     [branches, setBranches] = useState<Ref[]>([]),
     [branchId, setBranchId] = useState<string>(),
     [enabledFilter, setEnabledFilter] = useState<'all' | 'true' | 'false'>(mode === 'branch' ? 'true' : 'all'),
@@ -45,6 +44,8 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     [loadError, setLoadError] = useState(''),
     [selected, setSelected] = useState<Set<string>>(new Set());
   const [dirty, setDirty] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [deleteAll, setDeleteAll] = useState<{ count: number; confirmation: string }>();
   const load = async () => {
     setRefreshing(true);
     setLoadError('');
@@ -65,10 +66,10 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     void load();
   }, [page, branchId, enabledFilter, mode]);
   useEffect(() => {
-    Promise.all([api<Ref[]>('/categories'), api<Ref[]>('/brands'), api<Ref[]>('/branches')])
-      .then(([c, b, br]) => {
+    void api<{ user: { roles: { code: string }[] } }>('/auth/me').then((me) => setIsSuperAdmin(me.user.roles.some((role) => role.code === 'SUPER_ADMIN')));
+    Promise.all([api<Ref[]>('/categories'), api<Ref[]>('/branches')])
+      .then(([c, br]) => {
         setCategories(c);
-        setBrands(b);
         setBranches(br);
         const selected = branchContext.get();
         setBranchId(br.length === 1 ? br[0].id : selected);
@@ -99,6 +100,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         description: f.get('description') || undefined,
         sku: f.get('sku') || undefined,
         supplierReference: f.get('supplierReference') || undefined,
+        imageUrl: f.get('imageUrl') || undefined,
         presentationType: f.get('presentationType') || undefined,
         netContent: f.get('netContent') || undefined,
         netContentUnit: f.get('netContentUnit') || undefined,
@@ -116,9 +118,11 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
               stockMinimum: String(f.get(`stock-${branchId}`) || '0'),
               enabled: true,
               posFavorite: f.get(`favorite-${branchId}`) === 'on',
-              allowManualPrice: f.get(`manual-${branchId}`) === 'on',
+              allowManualPrice: f.get('allowManualPriceDefault') === 'on',
               location: f.get(`location-${branchId}`) || undefined,
               shelf: f.get(`shelf-${branchId}`) || undefined,
+              saleFloorStock: String(f.get(`sale-floor-${branchId}`) || '0'),
+              warehouseStock: String(f.get(`warehouse-${branchId}`) || '0'),
             }
           : undefined,
       }),
@@ -261,12 +265,8 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     <>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">{mode === 'master' ? 'Catálogo maestro' : 'Productos de la sucursal'}</h1>
-          <p className="mt-2 text-slate-500">
-            {mode === 'master'
-              ? 'Todos los artículos conocidos, estén habilitados o no.'
-              : 'Sólo artículos comercializados y su configuración local.'}
-          </p>
+          <p className="eyebrow">CATÁLOGO Y VENTA</p><h1 className="text-3xl font-bold">Productos</h1>
+          <p className="mt-2 text-slate-500">Buscá, editá precios y organizá el surtido sin cambiar de sección.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button className="btn-secondary" onClick={() => void exportCsv()}>
@@ -289,25 +289,9 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
             <PackagePlus size={19} />
             Nuevo producto
           </button>
+          {isSuperAdmin && <button className="btn-secondary text-red-700" onClick={async () => { const summary = await api<{ count: number }>('/products/bulk-delete-all/summary'); setDeleteAll({ count: summary.count, confirmation: '' }); }}><Trash2 size={18}/>Eliminar todos</button>}
         </div>
       </div>
-      <nav className="mt-5 flex gap-2 overflow-x-auto border-b">
-        <a className="product-subtab active" href={appPath('/products')}>
-          Productos
-        </a>
-        <a className="product-subtab" href={appPath('/categories')}>
-          Categorías
-        </a>
-        <button
-          className="product-subtab"
-          onClick={() => alert('Las familias se administran desde la ficha del producto.')}
-        >
-          Familias
-        </button>
-        <a className="product-subtab" href={appPath('/prices')}>
-          Precios y márgenes
-        </a>
-      </nav>
       {selected.size > 0 && (
         <div className="bulk-action-bar">
           <b>{selected.size} seleccionados</b>
@@ -505,6 +489,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
           </div>
         </footer>
       </div>
+      {deleteAll && <div className="modal-backdrop"><section className="modal-card border-2 border-red-600"><div className="flex justify-between"><div><p className="font-bold text-red-700">ZONA DE PELIGRO · SUPER_ADMIN</p><h2 className="text-2xl font-bold">Eliminar todos los productos</h2></div><button onClick={() => setDeleteAll(undefined)}><X/></button></div><p>Se desactivarán mediante soft delete <b>{deleteAll.count.toLocaleString('es-AR')} productos</b>. Las ventas, compras, movimientos e historiales permanecerán guardados.</p><label>Escribí <b>ELIMINAR</b> para confirmar<input autoFocus value={deleteAll.confirmation} onChange={(e) => setDeleteAll({ ...deleteAll, confirmation: e.target.value })}/></label><button className="min-h-14 bg-red-700 text-white" disabled={deleteAll.confirmation !== 'ELIMINAR'} onClick={async () => { const result = await api<{ count: number }>('/products/bulk-delete-all', { method: 'POST', body: JSON.stringify({ confirmation: deleteAll.confirmation }) }); setDeleteAll(undefined); setImporting(`${result.count} productos fueron desactivados.`); await load(); }}>Eliminar catálogo completo</button></section></div>}
       {show && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/50 p-4">
           <form
@@ -526,108 +511,27 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                 <X />
               </button>
             </div>
-            <h3 className="mt-7 font-bold">Datos generales</h3>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <input name="internalCode" placeholder="Código interno (automático si se deja vacío)" />
-              <input name="name" placeholder="Nombre" required />
-              <input name="shortName" placeholder="Nombre corto" />
-              <textarea name="description" placeholder="Descripción" className="md:col-span-2" />
-              <select name="categoryId" required>
-                <option value="">Categoría</option>
-                {categories.map((x) => (
-                  <option value={x.id}>{x.name}</option>
-                ))}
-              </select>
-              <select name="subcategoryId">
-                <option value="">Sin subcategoría</option>
-                {categories
-                  .filter((x) => x.parentId)
-                  .map((x) => (
-                    <option value={x.id} key={x.id}>
-                      {x.name}
-                    </option>
-                  ))}
-              </select>
-              <select name="brandId">
-                <option value="">Sin marca</option>
-                {brands.map((x) => (
-                  <option value={x.id}>{x.name}</option>
-                ))}
-              </select>
-              <select name="unitType">
-                <option>UNIT</option>
-                <option>KG</option>
-                <option>GRAM</option>
-                <option>LITER</option>
-                <option>METER</option>
-              </select>
-              <input name="taxRate" type="number" min="0" value="21" readOnly />
-              <input name="barcode" placeholder="Código de barras principal" />
-            </div>
-            <h3 className="mt-8 font-bold">Identificación y presentación</h3>
-            <div className="mt-3 grid gap-3 md:grid-cols-3">
-              <input name="sku" placeholder="SKU opcional" />
-              <input name="supplierReference" placeholder="Referencia externa / proveedor" />
-              <select name="presentationType">
-                <option value="">Presentación</option>
-                {[
-                  'UNIT',
-                  'BOTTLE',
-                  'CAN',
-                  'PACKAGE',
-                  'BOX',
-                  'BAG',
-                  'JAR',
-                  'SACHET',
-                  'PACK',
-                  'TRAY',
-                  'DISPLAY',
-                  'CASE',
-                  'OTHER',
-                ].map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-              </select>
-              <input name="netContent" type="number" min="0" step="0.001" placeholder="Contenido neto" />
-              <select name="netContentUnit">
-                <option value="">Unidad contenido</option>
-                {['ML', 'L', 'G', 'KG', 'UN', 'M', 'CM', 'OTHER'].map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-              </select>
-              <input name="unitsPerCase" type="number" min="1" placeholder="Unidades por bulto" />
-              <input name="caseBarcode" placeholder="Código de bulto" />
-              <label className="flex items-center gap-2">
-                <input name="isWeighted" type="checkbox" /> Producto pesable
-              </label>
-              <label className="flex items-center gap-2">
-                <input name="allowManualPriceDefault" type="checkbox" /> Permitir precio manual
-              </label>
-              <textarea className="rounded-xl border p-3 md:col-span-3" name="notes" placeholder="Notas del producto" />
-            </div>
-            <h3 className="mt-8 font-bold">Configuración por sucursal</h3>
-            <div className="mt-3 grid gap-3">
-              {branches
-                .filter((branch) => branch.id === branchId)
-                .map((b) => (
-                  <fieldset className="rounded-xl border p-4" key={b.id}>
-                    <legend className="px-2 font-semibold">{b.name}</legend>
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <input name={`cost-${b.id}`} type="number" min="0" step="0.01" placeholder="Costo" />
-                      <input name={`price-${b.id}`} type="number" min="0" step="0.01" placeholder="Precio" />
-                      <input name={`stock-${b.id}`} type="number" min="0" step="0.001" placeholder="Stock mínimo" />
-                      <input name={`location-${b.id}`} placeholder="Ubicación (Pasillo / Góndola)" />
-                      <input name={`shelf-${b.id}`} placeholder="Estante" />
-                      <input name={`notes-${b.id}`} placeholder="Notas internas" />
-                      <label className="flex items-center gap-2">
-                        <input name={`favorite-${b.id}`} type="checkbox" /> Favorito POS
-                      </label>
-                      <label className="flex items-center gap-2">
-                        <input name={`manual-${b.id}`} type="checkbox" /> Precio manual en sucursal
-                      </label>
-                    </div>
-                  </fieldset>
-                ))}
+            <div className="product-create-sections">
+              <fieldset><legend>General</legend><div className="grid gap-3 md:grid-cols-2">
+                <label>Nombre<input name="name" required placeholder="Ej. Banana" /></label>
+                <label>Código interno<input name="internalCode" placeholder="Automático si se deja vacío" /></label>
+                <label>Barcode<input name="barcode" inputMode="numeric" placeholder="Escanear o escribir" /></label>
+                <label>Categoría<select name="categoryId" required><option value="">Seleccionar</option>{categories.filter((item) => !item.parentId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label className="md:col-span-2">URL de imagen<input name="imageUrl" type="url" placeholder="https://…" /></label>
+              </div></fieldset>
+              <fieldset><legend>Venta</legend><div className="grid gap-3 md:grid-cols-3">
+                <label>Precio<input name={`price-${branchId}`} type="number" min="0" step="0.01" required /></label>
+                <label>Costo<input name={`cost-${branchId}`} type="number" min="0" step="0.01" required /></label>
+                <label>Unidad<select name="unitType"><option value="UNIT">Unidad</option><option value="KG">Kilogramo</option><option value="GRAM">Gramo</option><option value="LITER">Litro</option><option value="METER">Metro</option></select></label>
+                <input type="hidden" name="taxRate" value="21"/><label className="check-field"><input name="isWeighted" type="checkbox"/>Producto pesable</label><label className="check-field"><input name="allowManualPriceDefault" type="checkbox"/>Permitir precio manual</label><label className="check-field"><input name={`favorite-${branchId}`} type="checkbox"/>Favorito del POS</label>
+              </div></fieldset>
+              <fieldset><legend>Stock</legend><div className="grid gap-3 md:grid-cols-3">
+                <label>Local de venta<input name={`sale-floor-${branchId}`} type="number" min="0" step="0.001" defaultValue="0"/></label>
+                <label>Depósito<input name={`warehouse-${branchId}`} type="number" min="0" step="0.001" defaultValue="0"/></label>
+                <label>Stock mínimo<input name={`stock-${branchId}`} type="number" min="0" step="0.001" defaultValue="0"/></label>
+              </div></fieldset>
+              <fieldset><legend>Proveedores</legend><p>Guardá el producto y agregá uno o varios proveedores desde su ficha, sin recargar este formulario.</p><label>Código o referencia inicial<input name="supplierReference" placeholder="Código del proveedor (opcional)"/></label></fieldset>
+              <details><summary>Opcional · Lotes y vencimientos</summary><p className="mt-2 text-sm text-slate-500">Los lotes se cargan al recibir compras o desde la ficha del producto para mantener trazabilidad.</p></details>
             </div>
             <div className="mt-7 flex justify-end gap-3">
               <button type="button" className="btn-secondary" onClick={() => setShow(false)}>

@@ -27,9 +27,9 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 - **Inicio:** ventas hoy/ayer/mes, tickets, promedio, ganancia y margen estimados, unidades vendidas, stock,
   vencimientos, bajo margen, top productos, ventas recientes, medios de pago y gráficos de 7/30 días y por hora. Faltan
   compras recomendadas y productos de baja rotación.
-- **Productos:** catálogo paginado, alta transaccional con barcode/configuración, edición detallada, barcodes, categorías,
-  marca opcional, familia, configuración comercial por sucursal, import/export, cambios masivos comerciales, historiales
-  y etiquetas básicas. Faltan completar varias acciones masivas y consolidar en una sola UX stock/proveedores/lotes.
+- **Productos:** pantalla y alta simplificadas en General, Venta, Stock, Proveedores y Opcional; catálogo paginado,
+  edición rápida por ficha, barcode, categorías, familia, import/export, acciones masivas e inicialización transaccional
+  de stock Local/Depósito. `SUPER_ADMIN` puede aplicar soft delete eficiente a todo el catálogo con confirmación fuerte.
 - **Proveedores/compras:** ficha de proveedor, relación multi-proveedor y aliases, órdenes, compras, confirmación,
   actualización opt-in de costo, ingreso idempotente de stock y revisión de factura. La recomendación de compras no está.
 - **Facturas:** carga, almacenamiento validado, matching y corrección humana; sólo existe adaptador manual, sin OCR/IA
@@ -37,37 +37,37 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 - **Stock:** cantidad agregada por producto/sucursal, reservas/tránsito, movimientos, ajustes, inventarios, mermas,
   transferencias entre sucursales, lotes/vencimientos y recepción de compras. Las pantallas operativas secundarias son
   básicas y ahora se acceden principalmente desde Stock.
-- **POS/ventas:** búsqueda y scanner, accesos rápidos por favoritos y categorías, teclado/touch, cantidades decimales,
-  precio/descuento con permiso, pagos, venta idempotente, ticket web, consulta, anulación, devolución, reimpresión y
-  acceso visible a Admin según RBAC. Suspendidos son locales al navegador; no hay caja/arqueos ni autorización por
-  credenciales de un segundo usuario.
-- **Configuración:** `CompanySetting` y `BranchSetting`, pantalla consolidada y auditoría. Varias pestañas son informativas
-  y algunas preferencias del POS todavía se duplican en `localStorage`.
+- **POS/ventas:** inicio rápido sin salir del POS para sucursal/cajero/terminal/fondo y apertura persistida de caja;
+  scanner, teclado, grupos táctiles configurables, teclado numérico para pesables, pagos, venta idempotente, ticket,
+  anulación, devolución y acceso Admin. Suspendidos continúan locales y aún no existe cierre/arqueo.
+- **Configuración:** seis secciones simples persistidas en `CompanySetting`/`BranchSetting`; subida real de fondo POS,
+  apariencia compartida y editor por sucursal de grupos, iconos, orden, productos y tamaños táctiles.
 - **Sucursales/usuarios/auditoría/etiquetas:** CRUD y vistas funcionales iniciales; ficha de sucursal usa tabs, auditoría
   traduce códigos conocidos y etiquetas imprimen presets básicos, todavía sin editor profesional en mm.
 
 # Módulos rotos
 
 - No se encontró un módulo completamente inutilizable mediante revisión estática/build/tests.
-- La separación requerida `SALE_FLOOR`/`WAREHOUSE` no existe en el modelo: el stock actual es una única cantidad por
-  sucursal/producto. Por lo tanto, reposición depósito → local y alerta “REPONER LOCAL” no funcionan.
-- El fondo del POS se convierte a base64 y se guarda dentro de JSON de configuración; no es una subida de archivo al
-  servidor y puede inflar PostgreSQL/request body. Además el POS no consume claramente toda esa apariencia persistida.
+- La UI de reposición depósito → local todavía no está expuesta, aunque los saldos `SALE_FLOOR`/`WAREHOUSE` ya se
+  persisten y las altas/ventas/compras asignan ubicación.
 
 # Pendientes
 
-- Diseñar sin pérdida la ubicación de stock local/depósito, movimientos internos y migración de existencias actuales.
+- Completar la UI de reposición interna depósito → local y sus movimientos específicos.
 - Completar producto único por tabs: comercial, stock por ubicación, proveedores, lotes/vencimientos, POS e historial.
 - Acciones masivas faltantes: categoría, familia, proveedor, mínimo, etiquetas/exportación integradas y desactivación
   robusta con preview/auditoría.
 - Compras recomendadas explicables por cobertura, venta histórica, bultos y proveedor preferido.
 - Promociones/liquidaciones temporales (porcentaje, fijo, 2x1, 3x2, segunda unidad) sin alterar precio base.
 - Presets profesionales de etiquetas en mm y flujo selección → cantidad → preview → impresión.
-- Persistir accesos rápidos, shortcuts, apariencia y carritos suspendidos según sucursal/terminal en servidor.
+- Persistir shortcuts configurables y carritos suspendidos según sucursal/terminal en servidor.
 - Pruebas HTTP/e2e automatizadas con PostgreSQL aislado para los recorridos críticos.
 
 # Últimos cambios
 
+- 2026-08-30: migración de operación táctil incorpora aperturas de caja, grupos rápidos configurables y saldos de stock
+  Local/Depósito; se simplifican Productos y Configuración, el fondo POS se sirve desde backend y la venta exige caja
+  abierta cuando la sucursal así lo configura.
 - 2026-08-30: el POS incorpora selector rápido de categorías y productos (incluidos Panadería, Frutas o Carbón cuando
   esas categorías existen), y un botón ADMIN responsivo con bypass de `SUPER_ADMIN`; el panel adopta un centro de
   operaciones oscuro/verde con navegación y retorno al modo venta más directos.
@@ -89,6 +89,8 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 - `20260817120000_message6_sales`: terminales, medios de pago, ventas, pagos y devoluciones.
 - `20260818120000_unified_product_core`: familias y atributos adicionales de proveedor-producto.
 - `20260819120000_server_settings`: configuración JSON por empresa y sucursal.
+- `20260830170000_pos_touch_operation`: sesiones de caja, grupos rápidos configurables y saldos por ubicación; migra el
+  stock histórico existente a `SALE_FLOOR` sin borrar movimientos ni existencias.
 
 # Decisiones técnicas
 
@@ -105,8 +107,8 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 - Fechas del Dashboard se cortan con zona horaria del proceso/UTC y no aplican explícitamente
   `America/Argentina/Buenos_Aires`; los límites diarios pueden ser incorrectos en producción.
 - La búsqueda global del layout es sólo visual. Algunas rutas/componentes legados siguen presentes aunque haya redirects.
-- No existe `UserPreference`; varias preferencias no críticas permanecen en almacenamiento del navegador.
-- No hay OCR/LLM real, cuenta corriente de proveedor, FEFO, promoción temporal, caja, apertura/cierre o hardware fiscal.
+- No existe `UserPreference`; carrito y ventas suspendidas no críticas permanecen en almacenamiento del navegador.
+- No hay OCR/LLM real, cuenta corriente de proveedor, FEFO, promoción temporal, cierre/arqueo o hardware fiscal.
 
 # Próximos pasos
 

@@ -208,6 +208,10 @@ enum StockMovementType {
   INITIAL_STOCK
   OTHER
 }
+enum StockLocationType {
+  SALE_FLOOR
+  WAREHOUSE
+}
 
 enum InventoryType {
   FULL
@@ -256,6 +260,20 @@ model Stock {
 
   @@unique([branchId, productId])
   @@index([companyId, branchId])
+  @@index([productId])
+}
+
+model StockLocationBalance {
+  id        String            @id @default(uuid()) @db.Uuid
+  companyId String            @db.Uuid
+  branchId  String            @db.Uuid
+  productId String            @db.Uuid
+  location  StockLocationType
+  quantity  Decimal           @default(0) @db.Decimal(14, 3)
+  updatedAt DateTime          @updatedAt
+
+  @@unique([branchId, productId, location])
+  @@index([companyId, branchId, location])
   @@index([productId])
 }
 
@@ -393,6 +411,11 @@ enum SaleStatus {
   REFUNDED
 }
 
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+}
+
 model Terminal {
   id             String   @id @default(uuid()) @db.Uuid
   companyId      String   @db.Uuid
@@ -403,9 +426,58 @@ model Terminal {
   nextSaleNumber Int      @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  cashSessions   CashSession[]
 
   @@unique([branchId, code])
   @@index([companyId, active])
+}
+
+model CashSession {
+  id             String            @id @default(uuid()) @db.Uuid
+  companyId      String            @db.Uuid
+  branchId       String            @db.Uuid
+  terminalId     String            @db.Uuid
+  cashierUserId  String            @db.Uuid
+  openedByUserId String            @db.Uuid
+  status         CashSessionStatus @default(OPEN)
+  openingAmount  Decimal           @db.Decimal(14, 2)
+  openedAt       DateTime          @default(now())
+  closedAt       DateTime?
+  terminal       Terminal          @relation(fields: [terminalId], references: [id])
+  cashier        User              @relation("CashierSessions", fields: [cashierUserId], references: [id])
+  sales          Sale[]
+
+  @@index([companyId, branchId, status])
+  @@index([terminalId, status])
+  @@index([cashierUserId, status])
+}
+
+model PosQuickGroup {
+  id         String              @id @default(uuid()) @db.Uuid
+  companyId  String              @db.Uuid
+  branchId   String              @db.Uuid
+  name       String
+  icon       String              @default("◉")
+  sortOrder  Int                 @default(0)
+  buttonSize String              @default("MEDIUM")
+  active     Boolean             @default(true)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  items      PosQuickGroupItem[]
+
+  @@index([companyId, branchId, active, sortOrder])
+}
+
+model PosQuickGroupItem {
+  id        String        @id @default(uuid()) @db.Uuid
+  groupId   String        @db.Uuid
+  productId String        @db.Uuid
+  sortOrder Int           @default(0)
+  group     PosQuickGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  product   Product       @relation(fields: [productId], references: [id])
+
+  @@unique([groupId, productId])
+  @@index([productId])
 }
 
 model PaymentMethod {
@@ -430,6 +502,7 @@ model Sale {
   companyId          String       @db.Uuid
   branchId           String       @db.Uuid
   terminalId         String       @db.Uuid
+  cashSessionId      String?      @db.Uuid
   userId             String       @db.Uuid
   saleNumber         String
   status             SaleStatus   @default(DRAFT)
@@ -449,10 +522,12 @@ model Sale {
   items              SaleItem[]
   payments           Payment[]
   returns            SaleReturn[]
+  cashSession        CashSession? @relation(fields: [cashSessionId], references: [id])
 
   @@unique([companyId, saleNumber])
   @@index([companyId, branchId, createdAt])
   @@index([terminalId, createdAt])
+  @@index([cashSessionId])
   @@index([status])
 }
 
@@ -551,6 +626,7 @@ model User {
   createdPurchaseOrders PurchaseOrder[] @relation("PurchaseOrderCreator")
   createdPurchases      Purchase[]      @relation("PurchaseCreator")
   confirmedPurchases    Purchase[]      @relation("PurchaseConfirmer")
+  cashSessions          CashSession[]   @relation("CashierSessions")
 
   @@unique([companyId, username])
   @@unique([companyId, email])
@@ -710,6 +786,7 @@ model Product {
   supplierAliases         SupplierProductAlias[]
   purchaseOrderItems      PurchaseOrderItem[]
   purchaseItems           PurchaseItem[]
+  quickGroupItems         PosQuickGroupItem[]
 
   @@unique([companyId, internalCode])
   @@index([companyId, active, name])
