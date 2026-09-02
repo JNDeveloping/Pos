@@ -24,7 +24,8 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 - **Autenticación/RBAC:** acceso explícito e independiente al Panel de caja y Panel del dueño; permisos operativos
   granulares por rol, presets de caja básica/avanzada, alcance de sucursal y bypass/protecciones de `SUPER_ADMIN`.
-- **Inicio:** ventas hoy/ayer/mes, tickets, promedio, ganancia y margen estimados, unidades vendidas, stock,
+- **Inicio/monitor:** administradores ingresan a un monitor multi-sucursal en vivo (ventas, tickets, cajas, stock y
+  última actividad, actualización cada 15 segundos); el Dashboard ofrece ventas hoy/ayer/mes, ganancia, unidades, stock,
   vencimientos, bajo margen, top productos, ventas recientes, medios de pago y gráficos de 7/30 días y por hora. Faltan
   compras recomendadas y productos de baja rotación.
 - **Productos:** pantalla y alta simplificadas en General, Venta, Stock, Proveedores y Opcional; catálogo paginado,
@@ -42,7 +43,8 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
   Suspendidos continúan locales y aún no existe arqueo contable ni gestión de retiros.
 - **Configuración:** seis secciones simples persistidas en `CompanySetting`/`BranchSetting`; subida real de fondo POS,
   apariencia compartida y editor por sucursal de grupos, iconos, orden, productos y tamaños táctiles.
-- **Sucursales/usuarios/auditoría/etiquetas:** CRUD y vistas funcionales iniciales; ficha de sucursal usa tabs, auditoría
+- **Sucursales/usuarios/auditoría/etiquetas:** Usuarios permite alta, edición completa, contraseña, activación, roles,
+  sucursales y baja lógica auditada; ficha de sucursal usa tabs, auditoría
   traduce códigos conocidos y etiquetas imprimen presets básicos, todavía sin editor profesional en mm.
 
 # Módulos rotos
@@ -65,6 +67,9 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 # Últimos cambios
 
+- 2026-09-02: se completa la administración de usuarios (datos, contraseña, estado, roles, sucursales y baja lógica),
+  se agrega pantalla completa a todas las superficies y el login administrativo abre un monitor multi-sucursal en vivo
+  con acceso explícito al Panel de admin. El resumen/monitor valida alcance de sucursales en backend.
 - 2026-09-02: el POS se rediseña con superficie minimalista y estado de caja visible; se incorpora cierre de caja y
   acceso multi-sucursal explícito por usuario. La sesión del dispositivo persiste y se renueva durante 30 días, mientras
   que cerrar sesión manualmente continúa revocando y eliminando credenciales.
@@ -122,7 +127,7 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
   `America/Argentina/Buenos_Aires`; los límites diarios pueden ser incorrectos en producción.
 - La búsqueda global del layout es sólo visual. Algunas rutas/componentes legados siguen presentes aunque haya redirects.
 - No existe `UserPreference`; carrito y ventas suspendidas no críticas permanecen en almacenamiento del navegador.
-- No hay OCR/LLM real, cuenta corriente de proveedor, FEFO, promoción temporal, cierre/arqueo o hardware fiscal.
+- No hay OCR/LLM real, cuenta corriente de proveedor, FEFO, promoción temporal, arqueo contable o hardware fiscal.
 
 # Próximos pasos
 

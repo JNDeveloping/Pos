@@ -1071,3 +1071,53 @@
 .pos-opening-card label small { color: #64748b; font-size: .72rem; font-weight: 500; }
 @media (max-width: 1100px) { .pos-session-chip { display: none !important; } .pos-grid { grid-template-columns: 1fr 320px; } }
 @media (max-width: 850px) { .pos-header { height: auto; min-height: 70px; padding: 10px 12px; } .pos-head-meta > span:not(.pos-online):not(.pos-offline), .pos-close-cash span, .pos-admin-link span { display: none; } .pos-grid { display: block; padding: 9px; } .pos-summary { position: sticky; bottom: 0; margin-top: 10px; border-radius: 18px 18px 0 0; } }
+
+.login-fullscreen { position: fixed; right: 20px; top: 20px; display: grid; width: 48px; height: 48px; place-items: center; border: 1px solid #bbf7d0; border-radius: 15px; color: #166534; background: white; box-shadow: 0 10px 30px rgb(15 23 42 / .1); }
+.owner-monitor { min-height: 100vh; color: #e2e8f0; background: radial-gradient(circle at 20% -10%, #14532d 0, #06130c 34%, #020806 100%); }
+.owner-monitor h1, .owner-monitor h2, .owner-monitor h3 { color: #f8fafc; }
+.owner-monitor-header { position: sticky; top: 0; z-index: 40; display: flex; min-height: 76px; align-items: center; gap: 14px; padding: 10px 24px; border-bottom: 1px solid rgb(74 222 128 / .16); background: rgb(2 13 8 / .88); backdrop-filter: blur(18px); }
+.owner-monitor-brand { display: flex; min-width: 300px; align-items: center; gap: 12px; }
+.owner-monitor-brand > span { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 14px; color: #052e16; background: #4ade80; }
+.owner-monitor-brand small, .owner-monitor-brand b { display: block; }
+.owner-monitor-brand small { color: #86efac; font-size: .65rem; font-weight: 900; letter-spacing: .15em; }
+.owner-monitor-brand b { margin-top: 2px; font-size: 1rem; }
+.owner-monitor-clock { display: flex; align-items: center; gap: 9px; margin-left: auto; color: #86efac; }
+.owner-monitor-clock span, .owner-monitor-clock b, .owner-monitor-clock small { display: block; }
+.owner-monitor-clock b { font-size: .72rem; }
+.owner-monitor-clock small { color: #94a3b8; }
+.owner-admin-button { display: flex; min-height: 46px; align-items: center; gap: 8px; padding: 0 16px; border-radius: 13px; color: #052e16; background: #4ade80; font-weight: 900; }
+.owner-icon-button { display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid rgb(255 255 255 / .13); border-radius: 13px; color: #cbd5e1; }
+.owner-monitor > main { width: min(1600px, 100%); margin: auto; padding: 30px; }
+.owner-hero { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
+.owner-hero h1 { margin-top: 3px; font-size: clamp(2rem, 4vw, 3.8rem); font-weight: 900; letter-spacing: -.045em; }
+.owner-hero p:not(.eyebrow) { color: #94a3b8; }
+.owner-hero > span { padding: 8px 12px; border-radius: 999px; font-size: .75rem; font-weight: 850; }
+.owner-hero > span.online { color: #86efac; background: rgb(34 197 94 / .12); }
+.owner-hero > span.offline { color: #fecaca; background: rgb(239 68 68 / .12); }
+.owner-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 28px; }
+.owner-kpis article { display: flex; min-height: 126px; align-items: center; gap: 16px; padding: 20px; border: 1px solid rgb(255 255 255 / .09); border-radius: 20px; background: rgb(255 255 255 / .055); box-shadow: inset 0 1px rgb(255 255 255 / .05); }
+.owner-kpis article > span { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 15px; color: #052e16; background: #4ade80; }
+.owner-kpis small, .owner-kpis b { display: block; }
+.owner-kpis small { color: #94a3b8; }
+.owner-kpis b { margin-top: 4px; font-size: 1.65rem; }
+.owner-branches { margin-top: 26px; padding: 22px; border: 1px solid rgb(255 255 255 / .08); border-radius: 24px; background: rgb(1 9 5 / .58); }
+.owner-branches > header { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+.owner-branches h2 { font-size: 1.35rem; font-weight: 850; }
+.owner-branches header p { color: #64748b; }
+.owner-branches header button { padding: 9px 13px; border: 1px solid rgb(74 222 128 / .3); border-radius: 11px; color: #86efac; }
+.owner-branch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; margin-top: 18px; }
+.owner-branch-grid > article { overflow: hidden; border: 1px solid rgb(255 255 255 / .09); border-radius: 20px; background: linear-gradient(155deg, rgb(255 255 255 / .075), rgb(255 255 255 / .025)); }
+.owner-branch-title { display: flex; align-items: center; gap: 11px; padding: 17px; border-bottom: 1px solid rgb(255 255 255 / .07); }
+.owner-branch-title > span { display: grid; width: 39px; height: 39px; place-items: center; border-radius: 12px; color: #86efac; background: rgb(74 222 128 / .1); }
+.owner-branch-title h3 { font-weight: 850; }
+.owner-branch-title small { color: #64748b; }
+.owner-branch-title i { margin-left: auto; padding: 6px 9px; border-radius: 999px; color: #94a3b8; background: rgb(148 163 184 / .1); font-size: .68rem; font-style: normal; font-weight: 850; }
+.owner-branch-title i.active { color: #86efac; background: rgb(34 197 94 / .12); }
+.owner-branch-grid dl { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: rgb(255 255 255 / .06); }
+.owner-branch-grid dl > div { padding: 15px; background: #07110b; }
+.owner-branch-grid dt { color: #64748b; font-size: .7rem; }
+.owner-branch-grid dd { margin-top: 3px; font-size: 1.15rem; font-weight: 850; }
+.owner-branch-grid footer { display: flex; align-items: center; gap: 8px; padding: 14px 17px; color: #94a3b8; font-size: .75rem; }
+.owner-branch-grid footer svg { width: 16px; color: #4ade80; }
+@media (max-width: 900px) { .owner-monitor-header { flex-wrap: wrap; padding: 10px 14px; } .owner-monitor-brand { min-width: 0; flex: 1; } .owner-monitor-clock { display: none; } .owner-admin-button { font-size: .75rem; } .owner-monitor > main { padding: 20px 12px; } .owner-kpis { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 520px) { .owner-kpis { grid-template-columns: 1fr; } .owner-branch-grid { grid-template-columns: 1fr; } .owner-admin-button { width: 46px; padding: 0; justify-content: center; overflow: hidden; color: transparent; } .owner-admin-button svg { color: #052e16; flex: 0 0 auto; } }

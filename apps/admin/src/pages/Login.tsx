@@ -3,6 +3,9 @@ import { Boxes, LockKeyhole } from 'lucide-react';
 import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
 import { storeTokens } from '../lib/auth-session';
+import { FullscreenButton } from '../components/FullscreenButton';
+export const loginDestination = (user: { roles: string[]; permissions: string[] }) =>
+  user.roles.includes('SUPER_ADMIN') || user.permissions.includes('panels.admin') ? '/owner' : '/';
 export function Login() {
   const [error, setError] = useState(''),
     [loading, setLoading] = useState(false);
@@ -12,12 +15,12 @@ export function Login() {
     setError('');
     const f = new FormData(e.currentTarget);
     try {
-      const r = await api<{ accessToken: string; refreshToken: string }>('/auth/login', {
+      const r = await api<{ accessToken: string; refreshToken: string; user: { roles: string[]; permissions: string[] } }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ identifier: f.get('identifier'), password: f.get('password') }),
       });
       storeTokens(r);
-      navigate('/');
+      navigate(loginDestination(r.user));
     } catch (x) {
       setError(
         navigator.onLine ? (x as Error).message : 'Necesitás Internet para el primer ingreso en este dispositivo.',
@@ -27,6 +30,7 @@ export function Login() {
   }
   return (
     <main className="grid min-h-screen place-items-center bg-brand-50 p-5">
+      <FullscreenButton className="login-fullscreen"/>
       <section className="card w-full max-w-md p-7 sm:p-9">
         <span className="mb-6 grid h-14 w-14 place-items-center rounded-2xl bg-brand-600 text-white">
           <Boxes />

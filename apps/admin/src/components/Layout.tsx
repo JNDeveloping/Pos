@@ -29,6 +29,7 @@ import { ConnectionStatus } from './ConnectionStatus';
 import type { Branch } from '../pages/Branches';
 import { appPath, currentRoute, navigate } from '../lib/navigation';
 import { clearTokens } from '../lib/auth-session';
+import { FullscreenButton } from './FullscreenButton';
 type NavItem = readonly [string, string, LucideIcon, string];
 const groups: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = [
   {
@@ -162,6 +163,7 @@ export function Layout({
           </label>
           <div className="ml-auto flex items-center gap-2">
             <ConnectionStatus />
+            <FullscreenButton />
             <button className="icon-button hidden sm:grid" aria-label="Notificaciones">
               <Bell size={19} />
               <span className="notification-dot" />

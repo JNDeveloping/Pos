@@ -156,6 +156,10 @@ scripts/                      controles de release y limpieza de offline legado
 - Mantener redirects de rutas legadas hacia la interfaz consolidada: precios/costos → Productos; roles → Usuarios;
   inventario/movimientos/transferencias → Stock; órdenes → Compras. No mantener dos UIs activas para el mismo flujo.
 - Preferir búsqueda backend, selección masiva, tabs, modales contextuales, estados vacíos y mensajes en español.
+- Todas las superficies (login, monitor del dueño, administración, panel de caja y POS) deben ofrecer pantalla completa
+  mediante la Fullscreen API, con botón visible y salida reversible para equipos all-in-one táctiles.
+- Después del login, los usuarios con `panels.admin` ingresan al monitor multi-sucursal `/owner`; los cajeros ingresan
+  al POS. Desde el monitor se accede explícitamente al panel administrativo.
 - Configuración crítica vive en `CompanySetting`/`BranchSetting` (y `UserPreference` cuando exista), nunca sólo en
   `localStorage`. Fondos subidos deben persistir como archivo en servidor; no almacenar imágenes base64 grandes en JSON.
 - Etiquetas usan medidas físicas en mm y presets 65×30, 70×35, 80×40, 100×50, A6, A5, A4 y personalizado, con preview

@@ -39,6 +39,7 @@ import { SaleDetail } from './pages/SaleDetail';
 import { PosSettingsPage } from './pages/PosSettings';
 import { CashierLayout } from './components/CashierLayout';
 import { CashierHome } from './pages/CashierHome';
+import { OwnerMonitor } from './pages/OwnerMonitor';
 const pages: Record<string, React.ReactNode> = {
   '/admin': <Dashboard />,
   '/branches': <Branches />,
@@ -85,6 +86,7 @@ const pages: Record<string, React.ReactNode> = {
 };
 const routePermissions: Record<string, string> = {
   '/admin': 'dashboard.view',
+  '/owner': 'dashboard.view',
   '/products': 'products.view',
   '/admin/products': 'products.view',
   '/catalog': 'products.view',
@@ -248,6 +250,7 @@ export default function App() {
       </>
     );
   }
+  if (route === '/owner') return <><OwnerMonitor me={me}/><PwaManager/></>;
   if (cashierRoute) {
     const cashierPage = productMatch ? <ProductDetail id={productMatch[1]} /> : route === '/cashier/products' ? <Products /> : route === '/cashier/stock' ? <Stock /> : route === '/cashier/sales' ? <SalesAdmin kind="sales" /> : route === '/cashier/labels' ? <Labels /> : <CashierHome me={me} />;
     return <><CashierLayout me={me}>{cashierPage}</CashierLayout><PwaManager /></>;
