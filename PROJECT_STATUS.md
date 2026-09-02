@@ -37,9 +37,9 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 - **Stock:** cantidad agregada por producto/sucursal, reservas/tránsito, movimientos, ajustes, inventarios, mermas,
   transferencias entre sucursales, lotes/vencimientos y recepción de compras. Las pantallas operativas secundarias son
   básicas y ahora se acceden principalmente desde Stock.
-- **POS/ventas:** inicio rápido sin salir del POS para sucursal/cajero/terminal/fondo y apertura persistida de caja;
-  scanner, teclado, grupos táctiles configurables, teclado numérico para pesables, pagos, venta idempotente, ticket,
-  anulación, devolución y acceso Admin. Suspendidos continúan locales y aún no existe cierre/arqueo.
+- **POS/ventas:** alta y baja auditada de caja con fondo inicial/importe contado, selector limitado a sucursales
+  habilitadas del usuario, scanner, teclado, grupos táctiles, pagos, venta idempotente, ticket, anulación y devolución.
+  Suspendidos continúan locales y aún no existe arqueo contable ni gestión de retiros.
 - **Configuración:** seis secciones simples persistidas en `CompanySetting`/`BranchSetting`; subida real de fondo POS,
   apariencia compartida y editor por sucursal de grupos, iconos, orden, productos y tamaños táctiles.
 - **Sucursales/usuarios/auditoría/etiquetas:** CRUD y vistas funcionales iniciales; ficha de sucursal usa tabs, auditoría
@@ -65,6 +65,9 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 # Últimos cambios
 
+- 2026-09-02: el POS se rediseña con superficie minimalista y estado de caja visible; se incorpora cierre de caja y
+  acceso multi-sucursal explícito por usuario. La sesión del dispositivo persiste y se renueva durante 30 días, mientras
+  que cerrar sesión manualmente continúa revocando y eliminando credenciales.
 - 2026-09-02: se separan Panel de caja y Panel del dueño con permisos de entrada independientes. Caja incorpora un
   espacio operativo limitado por rol para productos, precios, stock, ventas y etiquetas; el editor de roles organiza
   permisos por panel y ofrece presets no destructivos. La migración conserva los accesos que ya tenían los roles.
@@ -96,6 +99,8 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
   stock histórico existente a `SALE_FLOOR` sin borrar movimientos ni existencias.
 - `20260902120000_panel_access_permissions`: crea `panels.cashier`/`panels.admin` y los asigna de forma compatible a
   roles que ya tenían acceso POS o capacidades administrativas, sin retirar ninguna relación existente.
+- `20260902180000_cash_close_user_branches`: cierre de caja, permisos de alta/baja y relación multi-sucursal
+  `UserBranchAccess`, con backfill compatible de usuarios y sucursales existentes.
 
 # Decisiones técnicas
 
@@ -106,6 +111,8 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 - Facturas siempre requieren revisión humana; el adaptador manual es el comportamiento seguro por defecto.
 - Entrar a un panel y ejecutar una acción son autorizaciones separadas: el rol necesita `panels.cashier` o
   `panels.admin` y además el permiso funcional; el backend continúa validando cada operación.
+- En dispositivos POS confiables, access token dura 8 horas y la renovación persistente 30 días; logout revoca el token
+  en servidor y limpia tanto almacenamiento de sesión como persistente.
 
 # Problemas conocidos
 

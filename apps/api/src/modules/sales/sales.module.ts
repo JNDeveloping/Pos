@@ -87,6 +87,11 @@ class OpenCashSessionDto {
   @IsUUID() cashierUserId!: string;
   @IsNumber() @Min(0) openingAmount!: number;
 }
+class CloseCashSessionDto {
+  @IsUUID() cashSessionId!: string;
+  @IsNumber() @Min(0) closingAmount!: number;
+  @IsOptional() @IsString() closingNote?: string;
+}
 class QuickGroupDto {
   @IsUUID() branchId!: string;
   @IsString() @MinLength(2) name!: string;
@@ -798,10 +803,21 @@ class TerminalsController {
 @Controller('cash-sessions')
 export class CashSessionsController {
   constructor(private db: PrismaService) {}
+  private userBranchWhere(s: Session, userId: string, branchId?: string) {
+    return {
+      companyId: s.companyId,
+      active: true,
+      deletedAt: null,
+      ...(branchId ? { id: branchId } : {}),
+      ...(s.roles.includes('SUPER_ADMIN') && userId === s.sub
+        ? {}
+        : { OR: [{ users: { some: { id: userId } } }, { userAccesses: { some: { userId } } }] }),
+    };
+  }
   private async branch(s: Session, branchId: string) {
     if (s.branchId && s.branchId !== branchId) throw new BadRequestException('Sucursal inválida');
     const branch = await this.db.branch.findFirst({
-      where: { id: branchId, companyId: s.companyId, active: true, deletedAt: null },
+      where: this.userBranchWhere(s, s.sub, branchId),
       select: { id: true, name: true },
     });
     if (!branch) throw new BadRequestException('Sucursal inválida');
@@ -809,7 +825,7 @@ export class CashSessionsController {
   }
   @Get('branches') @RequirePermissions('sales.access') branches(@CurrentSession() s: Session) {
     return this.db.branch.findMany({
-      where: { companyId: s.companyId, active: true, deletedAt: null, ...(s.branchId ? { id: s.branchId } : {}) },
+      where: { ...this.userBranchWhere(s, s.sub), ...(s.branchId ? { id: s.branchId } : {}) },
       orderBy: { name: 'asc' },
     });
   }
@@ -821,7 +837,13 @@ export class CashSessionsController {
     const [terminals, cashiers] = await Promise.all([
       this.db.terminal.findMany({ where: { companyId: s.companyId, branchId, active: true }, orderBy: { name: 'asc' } }),
       this.db.user.findMany({
-        where: { companyId: s.companyId, active: true, deletedAt: null, OR: [{ branchId }, { branchId: null }] },
+        where: {
+          companyId: s.companyId,
+          active: true,
+          deletedAt: null,
+          ...(!s.roles.includes('SUPER_ADMIN') && !s.permissions.includes('sales.authorizeDiscount') ? { id: s.sub } : {}),
+          OR: [{ branchId }, { branchAccesses: { some: { branchId } } }],
+        },
         select: { id: true, firstName: true, lastName: true, username: true },
         orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
       }),
@@ -832,13 +854,15 @@ export class CashSessionsController {
     @CurrentSession() s: Session,
     @Query('terminalId') terminalId: string,
   ) {
-    return this.db.cashSession.findFirst({
+    const current = await this.db.cashSession.findFirst({
       where: { companyId: s.companyId, terminalId, status: 'OPEN' },
       include: { cashier: { select: { id: true, firstName: true, lastName: true, username: true } }, terminal: true },
       orderBy: { openedAt: 'desc' },
     });
+    if (current) await this.branch(s, current.branchId);
+    return current;
   }
-  @Post('open') @RequirePermissions('sales.access') async open(
+  @Post('open') @RequirePermissions('cashSessions.open') async open(
     @CurrentSession() s: Session,
     @Body() dto: OpenCashSessionDto,
   ) {
@@ -853,8 +877,10 @@ export class CashSessionsController {
       const count = await this.db.terminal.count({ where: { companyId: s.companyId, branchId: dto.branchId } });
       terminal = await this.db.terminal.create({ data: { companyId: s.companyId, branchId: dto.branchId, code: `CAJA-${count + 1}`, name: dto.terminalName?.trim() || `Caja ${count + 1}` } });
     }
-    const cashier = await this.db.user.findFirst({ where: { id: dto.cashierUserId, companyId: s.companyId, active: true, deletedAt: null } });
-    if (!terminal || !cashier || (cashier.branchId && cashier.branchId !== dto.branchId))
+    const cashier = await this.db.user.findFirst({
+      where: { id: dto.cashierUserId, companyId: s.companyId, active: true, deletedAt: null, OR: [{ branchId: dto.branchId }, { branchAccesses: { some: { branchId: dto.branchId } } }] },
+    });
+    if (!terminal || !cashier)
       throw new BadRequestException('Terminal o cajero inválido');
     const existing = await this.db.cashSession.findFirst({ where: { terminalId: terminal.id, status: 'OPEN' } });
     if (existing) throw new BadRequestException('La terminal ya tiene una caja abierta');
@@ -865,6 +891,28 @@ export class CashSessionsController {
       });
       await tx.auditLog.create({ data: { companyId: s.companyId, branchId: dto.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: opened.id, action: 'CASH_SESSION_OPENED', metadata: { openingAmount: String(dto.openingAmount), terminalId: terminal.id, cashierUserId: dto.cashierUserId } } });
       return opened;
+    });
+  }
+  @Post('close') @RequirePermissions('cashSessions.close') async close(
+    @CurrentSession() s: Session,
+    @Body() dto: CloseCashSessionDto,
+  ) {
+    const current = await this.db.cashSession.findFirst({
+      where: { id: dto.cashSessionId, companyId: s.companyId, status: 'OPEN' },
+      include: { terminal: true, cashier: { select: { id: true, firstName: true, lastName: true, username: true } } },
+    });
+    if (!current) throw new NotFoundException('La caja ya está cerrada o no existe');
+    await this.branch(s, current.branchId);
+    if (current.cashierUserId !== s.sub && !s.roles.includes('SUPER_ADMIN') && !s.permissions.includes('sales.authorizeDiscount'))
+      throw new BadRequestException('No puede cerrar la caja de otro cajero');
+    return this.db.$transaction(async (tx) => {
+      const closed = await tx.cashSession.update({
+        where: { id: current.id },
+        data: { status: 'CLOSED', closingAmount: dto.closingAmount, closingNote: dto.closingNote?.trim() || null, closedAt: new Date(), closedByUserId: s.sub },
+        include: { terminal: true, cashier: { select: { id: true, firstName: true, lastName: true, username: true } } },
+      });
+      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: current.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: current.id, action: 'CASH_SESSION_CLOSED', metadata: { openingAmount: String(current.openingAmount), closingAmount: String(dto.closingAmount), terminalId: current.terminalId, cashierUserId: current.cashierUserId } } });
+      return closed;
     });
   }
 }

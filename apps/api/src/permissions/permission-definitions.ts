@@ -110,6 +110,8 @@ const modules: Record<string, string[]> = {
   ],
   SALES: [
     'sales.access|Acceder al POS',
+    'cashSessions.open|Dar de alta / abrir caja',
+    'cashSessions.close|Dar de baja / cerrar caja',
     'sales.view|Ver ventas',
     'sales.create|Crear ventas',
     'sales.cancel|Anular ventas',
@@ -170,6 +172,8 @@ export const managerPermissionCodes = permissionCodes.filter((code) =>
     'labels.generate',
     'stock.view',
     'sales.access',
+    'cashSessions.open',
+    'cashSessions.close',
     'sales.view',
     'sales.create',
     'sales.cancel',

@@ -103,6 +103,7 @@ model Company {
   invoiceDocuments InvoiceDocument[]
   settings         CompanySetting[]
   branchSettings   BranchSetting[]
+  userBranchAccess UserBranchAccess[]
 }
 
 
@@ -180,6 +181,7 @@ model Branch {
   updatedAt                       DateTime        @updatedAt
   deletedAt                       DateTime?
   users                           User[]
+  userAccesses                    UserBranchAccess[]
   productConfigs                  BranchProduct[]
   priceHistory                    PriceHistory[]
   costHistory                     CostHistory[]
@@ -443,8 +445,12 @@ model CashSession {
   openingAmount  Decimal           @db.Decimal(14, 2)
   openedAt       DateTime          @default(now())
   closedAt       DateTime?
+  closingAmount  Decimal?          @db.Decimal(14, 2)
+  closingNote    String?
+  closedByUserId String?           @db.Uuid
   terminal       Terminal          @relation(fields: [terminalId], references: [id])
   cashier        User              @relation("CashierSessions", fields: [cashierUserId], references: [id])
+  closedBy       User?             @relation("ClosedCashSessions", fields: [closedByUserId], references: [id])
   sales          Sale[]
 
   @@index([companyId, branchId, status])
@@ -627,11 +633,26 @@ model User {
   createdPurchases      Purchase[]      @relation("PurchaseCreator")
   confirmedPurchases    Purchase[]      @relation("PurchaseConfirmer")
   cashSessions          CashSession[]   @relation("CashierSessions")
+  closedCashSessions    CashSession[]   @relation("ClosedCashSessions")
+  branchAccesses        UserBranchAccess[]
 
   @@unique([companyId, username])
   @@unique([companyId, email])
   @@index([companyId, branchId, active])
   @@index([email])
+}
+
+model UserBranchAccess {
+  userId    String   @db.Uuid
+  branchId  String   @db.Uuid
+  companyId String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, branchId])
+  @@index([companyId, branchId])
 }
 
 model Role {

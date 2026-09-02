@@ -1,5 +1,5 @@
 import { navigate } from './navigation';
-import { clearTokens, storeTokens } from './auth-session';
+import { clearTokens, readAccessToken, readRefreshToken, storeTokens } from './auth-session';
 
 export const API = (import.meta.env.VITE_API_URL || `${import.meta.env.BASE_URL}api`).replace(/\/$/, '');
 export type Me = {
@@ -38,7 +38,7 @@ async function readApiBody(response: Response) {
 }
 
 export async function api<T>(path: string, options: RequestInit = {}) {
-  let token = sessionStorage.getItem('accessToken');
+  let token = readAccessToken();
   const requestHeaders = new Headers(options.headers);
   if (!(options.body instanceof FormData) && !requestHeaders.has('Content-Type'))
     requestHeaders.set('Content-Type', 'application/json');
@@ -74,7 +74,7 @@ function refreshAccessToken() {
 }
 
 async function performRefresh() {
-  const refreshToken = sessionStorage.getItem('refreshToken');
+  const refreshToken = readRefreshToken();
   if (!refreshToken) throw new Error('La sesión expiró. Volvé a ingresar.');
   const response = await request(`${API}/auth/refresh`, {
     method: 'POST',

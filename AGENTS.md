@@ -72,8 +72,8 @@ scripts/                      controles de release y limpieza de offline legado
 ## Multiempresa y multisucursal
 
 - Aunque el piloto tenga una sola sucursal, conservar siempre `companyId`, `branchId`, `BranchProduct` y relaciones.
-- Una sola sucursal activa se selecciona automáticamente; con varias, se ofrece selector sólo dentro del alcance del
-  usuario. Una sesión asignada a sucursal no puede operar otra.
+- Una sola sucursal activa se selecciona automáticamente; con varias, se ofrece selector sólo entre los registros
+  `UserBranchAccess` del usuario. Una sesión no puede abrir ni operar una caja fuera de esas sucursales.
 - `Product` es el catálogo maestro de empresa. `BranchProduct` habilita el surtido y mantiene costo, precio, margen,
   mínimo, favorito y políticas comerciales por sucursal.
 - Copiar configuración de sucursal nunca debe copiar existencias físicas. Validar en backend que toda sucursal recibida
@@ -145,7 +145,8 @@ scripts/                      controles de release y limpieza de offline legado
 - Accesos rápidos y apariencia deben configurarse por sucursal y persistirse en servidor. `localStorage` sólo puede ser
   caché/preferencia no crítica; carrito temporal en `sessionStorage` tampoco sustituye persistencia de ventas.
 - Venta, pago, cancelación, devolución y movimientos deben ser transaccionales, idempotentes y mantener snapshots.
-- No integrar hardware fiscal, caja/arqueos o persistencia compartida de suspendidos hasta una tarea explícita.
+- Apertura y cierre básico de caja usan `CashSession` y auditoría. No integrar arqueos, retiros, hardware fiscal o
+  persistencia compartida de suspendidos hasta una tarea explícita.
 
 ## UI/UX, navegación y configuración
 

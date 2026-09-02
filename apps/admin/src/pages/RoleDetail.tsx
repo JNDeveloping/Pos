@@ -26,7 +26,7 @@ const moduleLabels: Record<string, string> = {
   STOCK: 'Stock operativo',
 };
 const cashierModules = new Set(['PANELS', 'SALES', 'TERMINALS', 'PAYMENT_METHODS', 'PRODUCTS', 'PRICES', 'OPERATIONS', 'STOCK']);
-const cashierBasic = ['panels.cashier', 'sales.access', 'sales.create', 'products.view', 'terminals.view', 'paymentMethods.view'];
+const cashierBasic = ['panels.cashier', 'sales.access', 'cashSessions.open', 'cashSessions.close', 'sales.create', 'products.view', 'terminals.view', 'paymentMethods.view'];
 const cashierAdvanced = [...cashierBasic, 'sales.view', 'sales.discountItem', 'sales.reprintTicket', 'products.create', 'products.update', 'categories.view', 'prices.view', 'prices.update', 'stock.view', 'stock.adjust', 'labels.view', 'labels.generate'];
 export function RoleDetail({ id }: { id: string }) {
   const [role, setRole] = useState<Detail>(),

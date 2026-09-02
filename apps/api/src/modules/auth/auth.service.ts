@@ -17,11 +17,11 @@ export class AuthService {
   private async tokens(p: Session) {
     const accessToken = await this.jwt.signAsync(p, {
       secret: this.secret('JWT_SECRET'),
-      expiresIn: (process.env.JWT_EXPIRES_IN ?? '15m') as never,
+      expiresIn: (process.env.JWT_EXPIRES_IN ?? '8h') as never,
     });
     const refreshToken = await this.jwt.signAsync(p, {
       secret: this.secret('JWT_REFRESH_SECRET'),
-      expiresIn: (process.env.JWT_REFRESH_EXPIRES_IN ?? '7d') as never,
+      expiresIn: (process.env.JWT_REFRESH_EXPIRES_IN ?? '30d') as never,
     });
     await this.db.user.update({ where: { id: p.sub }, data: { refreshTokenHash: await hash(refreshToken) } });
     return { accessToken, refreshToken };

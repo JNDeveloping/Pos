@@ -243,7 +243,7 @@ export default function App() {
       );
     return (
       <>
-        <Pos me={me} branches={branches} branchId={currentBranchId} />
+        <Pos me={me} branches={branches} branchId={currentBranchId} onBranchChange={(next) => { branchContext.set(next); setCurrentBranchId(next); }} />
         <PwaManager />
       </>
     );

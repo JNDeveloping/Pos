@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Expand,
   LayoutDashboard,
+  Power,
   Minus,
   Pause,
   Plus,
@@ -29,7 +30,6 @@ import type { Branch } from './Branches';
 import { DEFAULT_POS_SETTINGS, type PosSettings } from '../lib/pos-settings';
 import { appPath } from '../lib/navigation';
 import { API } from '../lib/api';
-import { branchContext } from '../lib/branch-context';
 
 type Method = { id: string; code: string; name: string; requiresReference: boolean; active?: boolean };
 type Terminal = { id: string; name: string; code: string; branchId: string; active?: boolean };
@@ -38,7 +38,7 @@ type Cashier = { id: string; firstName: string; lastName: string; username: stri
 type CashSession = { id: string; terminalId: string; cashierUserId: string; openingAmount: string; terminal: Terminal; cashier: Cashier };
 type PosAppearance = { background?: string; backgroundOpacity?: number; backgroundOverlay?: string; backgroundBlur?: number; backgroundPosition?: string };
 type Suspended = { id: string; at: string; cart: CartLine[] };
-type Modal = 'help' | 'search' | 'edit' | 'discount' | 'suspended' | 'utilities' | 'payment' | null;
+type Modal = 'help' | 'search' | 'edit' | 'discount' | 'suspended' | 'utilities' | 'payment' | 'closeCash' | null;
 const money = (value: number) => value.toLocaleString('es-AR', { style: 'currency', currency: 'ARS' });
 const quantity = (line: CartLine) =>
   line.isWeighted ? `${line.quantity.toLocaleString('es-AR', { minimumFractionDigits: 3 })} kg` : String(line.quantity);
@@ -52,7 +52,7 @@ const quickIcon = (name: string) => {
   return '◉';
 };
 
-export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; branchId?: string }) {
+export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branches: Branch[]; branchId?: string; onBranchChange: (branchId: string) => void }) {
   const scanner = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PosProduct[]>([]);
@@ -75,6 +75,8 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
   const [cashiers, setCashiers] = useState<Cashier[]>([]);
   const [cashierId, setCashierId] = useState(() => sessionStorage.getItem('pos-cashier-id') ?? me.user.id);
   const [openingAmount, setOpeningAmount] = useState('0');
+  const [closingAmount, setClosingAmount] = useState('0');
+  const [closingNote, setClosingNote] = useState('');
   const [setupReady, setSetupReady] = useState(false);
   const [settings, setSettings] = useState<PosSettings>(DEFAULT_POS_SETTINGS);
   const [appearance, setAppearance] = useState<PosAppearance>({});
@@ -101,6 +103,8 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
 
   useEffect(() => {
     if (!branch) return;
+    setSetupReady(false);
+    setCashSession(undefined);
     Promise.all([
       api<Method[]>('/payment-methods'),
       api<{ terminals: Terminal[]; cashiers: Cashier[] }>(`/cash-sessions/bootstrap?branchId=${branch.id}`),
@@ -257,6 +261,16 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
     } catch (error) { setMessage({ kind: 'error', text: (error as Error).message }); }
     finally { setBusy(false); }
   };
+  const closeCash = async () => {
+    if (!cashSession || cart.length) return;
+    setBusy(true); setMessage(undefined);
+    try {
+      await api('/cash-sessions/close', { method: 'POST', body: JSON.stringify({ cashSessionId: cashSession.id, closingAmount: Number(closingAmount || 0), closingNote: closingNote || undefined }) });
+      setCashSession(undefined); setModal(null); setClosingAmount('0'); setClosingNote('');
+      setMessage({ kind: 'ok', text: 'Caja cerrada correctamente. Podés abrir una nueva caja cuando la necesites.' });
+    } catch (error) { setMessage({ kind: 'error', text: (error as Error).message }); }
+    finally { setBusy(false); }
+  };
 
   const removeSelected = useCallback(() => {
     if (!selectedId) return;
@@ -364,12 +378,16 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
       }
     >
       <header className="pos-header">
-        <div>
-          <b>EL RINCÓN POS</b>
-          <span>
+        <div className="pos-brand-block">
+          <span className="pos-brand-mark"><ShoppingCart /></span>
+          <span><b>EL RINCÓN</b><small>CAJA RÁPIDA</small></span>
+        </div>
+        <div className="pos-session-chip">
+          <span className={cashSession ? 'open' : ''} />
+          <div><b>{cashSession ? 'Caja abierta' : 'Caja sin abrir'}</b><small>
             {branch?.name ?? 'Sin sucursal'} ·{' '}
             {terminals.find((item) => item.id === terminalId)?.name ?? 'Sin terminal'}
-          </span>
+          </small></div>
         </div>
         <div className="pos-head-meta">
           <span>
@@ -384,6 +402,7 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
           <button title="Pantalla completa" onClick={() => void document.documentElement.requestFullscreen()}>
             <Expand size={18} />
           </button>
+          {cashSession && hasPermission(me, 'cashSessions.close') && <button className="pos-close-cash" title="Cerrar caja" onClick={() => { if (cart.length) setMessage({ kind: 'error', text: 'Terminá o cancelá la venta antes de cerrar la caja.' }); else setModal('closeCash'); }}><Power size={18}/><span>CERRAR CAJA</span></button>}
           {canOpenAdmin && (
             <a className="pos-admin-link" href={appPath('/admin')} title="Abrir centro de administración">
               <LayoutDashboard size={18} /> <span>ADMIN</span>
@@ -398,12 +417,12 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
         <div className="pos-opening-backdrop">
           <section className="pos-opening-card">
             <div><p className="eyebrow">INICIO RÁPIDO</p><h1>Abrir caja</h1><p>Elegí dónde y con quién vas a operar. Se recordará durante esta sesión.</p></div>
-            <label>Sucursal<select value={branch?.id ?? ''} onChange={(event) => { branchContext.set(event.target.value); window.location.reload(); }}>{branches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <label>Sucursal habilitada<select value={branch?.id ?? ''} onChange={(event) => onBranchChange(event.target.value)}>{branches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>Sólo se muestran las sucursales habilitadas para tu usuario.</small></label>
             <label>Cajero<select value={cashierId} onChange={(event) => setCashierId(event.target.value)}>{cashiers.map((cashier) => <option key={cashier.id} value={cashier.id}>{cashier.firstName} {cashier.lastName} · {cashier.username}</option>)}</select></label>
             <label>Terminal<select value={terminalId} onChange={(event) => setTerminalId(event.target.value)}><option value="">Crear Caja 1 ahora</option>{terminals.map((terminal) => <option key={terminal.id} value={terminal.id}>{terminal.name}</option>)}</select></label>
             <label>Fondo inicial<input inputMode="decimal" type="number" min="0" step="0.01" value={openingAmount} onChange={(event) => setOpeningAmount(event.target.value)} /></label>
             {message?.kind === 'error' && <p className="pos-feedback error">{message.text}</p>}
-            <button className="pos-open-button" disabled={busy || !branch || !cashierId} onClick={() => void openCash()}>{busy ? 'Abriendo…' : 'Abrir caja y comenzar'}</button>
+            {hasPermission(me, 'cashSessions.open') ? <button className="pos-open-button" disabled={busy || !branch || !cashierId} onClick={() => void openCash()}>{busy ? 'Abriendo…' : 'Dar de alta y abrir caja'}</button> : <p className="pos-feedback error">Tu rol no tiene permiso para dar de alta una caja.</p>}
           </section>
         </div>
       )}
@@ -725,6 +744,7 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
           }}
         />
       )}
+      {modal === 'closeCash' && cashSession && <ModalFrame title="Dar de baja y cerrar caja" close={() => setModal(null)}><div className="pos-form"><div className="cash-close-summary"><span>Terminal<b>{cashSession.terminal.name}</b></span><span>Fondo inicial<b>{money(Number(cashSession.openingAmount))}</b></span></div><label>Efectivo contado al cierre<input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={closingAmount} onChange={(event) => setClosingAmount(event.target.value)}/></label><label>Observación opcional<textarea value={closingNote} onChange={(event) => setClosingNote(event.target.value)} placeholder="Diferencias, retiro, observaciones…"/></label><p className="pos-feedback info">Esta acción deja la caja cerrada y registra el responsable en Auditoría.</p><button className="pos-close-confirm" disabled={busy || cart.length > 0 || Number(closingAmount) < 0} onClick={() => void closeCash()}>{busy ? 'Cerrando…' : 'Confirmar cierre de caja'}</button></div></ModalFrame>}
     </div>
   );
 }
