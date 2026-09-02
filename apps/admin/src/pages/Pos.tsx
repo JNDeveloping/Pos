@@ -16,7 +16,7 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
-import { api, hasAnyPermission, hasPermission, hasRole, type Me } from '../lib/api';
+import { api, hasPermission, type Me } from '../lib/api';
 import {
   addProductToCart,
   linePrice,
@@ -92,17 +92,7 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
     }
   });
   const branch = branches.find((item) => item.id === branchId) ?? branches[0];
-  const canOpenAdmin =
-    hasRole(me, 'SUPER_ADMIN') ||
-    hasAnyPermission(me, [
-      'dashboard.view',
-      'products.view',
-      'stock.view',
-      'purchases.view',
-      'suppliers.view',
-      'users.view',
-      'branches.settings',
-    ]);
+  const canOpenAdmin = hasPermission(me, 'panels.admin');
   const selected = cart.find((line) => line.id === selectedId);
   const subtotal = useMemo(() => cart.reduce((sum, line) => sum + linePrice(line) * line.quantity, 0), [cart]);
   const total = useMemo(() => cart.reduce((sum, line) => sum + lineSubtotal(line), 0), [cart]);
@@ -399,6 +389,9 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
               <LayoutDashboard size={18} /> <span>ADMIN</span>
             </a>
           )}
+          <a className="pos-admin-link" href={appPath('/cashier')} title="Abrir herramientas autorizadas de caja">
+            <LayoutDashboard size={18} /> <span>HERRAMIENTAS</span>
+          </a>
         </div>
       </header>
       {setupReady && !cashSession && (

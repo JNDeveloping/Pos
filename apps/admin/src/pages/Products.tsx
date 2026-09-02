@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileSpreadsheet, PackagePlus, Search, Trash2, X } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, hasPermission, type Me } from '../lib/api';
 import { branchContext } from '../lib/branch-context';
-import { appPath } from '../lib/navigation';
+import { appPath, currentRoute } from '../lib/navigation';
 type Ref = { id: string; name: string; parentId?: string };
 type Config = {
   id: string;
@@ -45,6 +45,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     [selected, setSelected] = useState<Set<string>>(new Set());
   const [dirty, setDirty] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [me, setMe] = useState<Me>();
   const [deleteAll, setDeleteAll] = useState<{ count: number; confirmation: string }>();
   const load = async () => {
     setRefreshing(true);
@@ -66,8 +67,10 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     void load();
   }, [page, branchId, enabledFilter, mode]);
   useEffect(() => {
-    void api<{ user: { roles: { code: string }[] } }>('/auth/me').then((me) => setIsSuperAdmin(me.user.roles.some((role) => role.code === 'SUPER_ADMIN')));
-    Promise.all([api<Ref[]>('/categories'), api<Ref[]>('/branches')])
+    void api<Me>('/auth/me').then(async (current) => {
+      setMe(current); setIsSuperAdmin(current.user.roles.some((role) => role.code === 'SUPER_ADMIN'));
+      return Promise.all([hasPermission(current, 'categories.view') ? api<Ref[]>('/categories') : Promise.resolve([]), api<Ref[]>(hasPermission(current, 'branches.view') ? '/branches' : '/cash-sessions/branches')]);
+    })
       .then(([c, br]) => {
         setCategories(c);
         setBranches(br);
@@ -269,11 +272,11 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
           <p className="mt-2 text-slate-500">Buscá, editá precios y organizá el surtido sin cambiar de sección.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="btn-secondary" onClick={() => void exportCsv()}>
+          {hasPermission(me, 'products.export') && <button className="btn-secondary" onClick={() => void exportCsv()}>
             <FileSpreadsheet size={18} />
             Exportar CSV
-          </button>
-          <label className="btn-secondary cursor-pointer">
+          </button>}
+          {hasPermission(me, 'products.import') && <label className="btn-secondary cursor-pointer">
             <FileSpreadsheet size={18} /> Importar Excel
             <input
               className="hidden"
@@ -284,18 +287,18 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                 if (file) void importExcel(file).catch((error) => setImporting(error.message));
               }}
             />
-          </label>
-          <button className="btn" onClick={() => setShow(true)}>
+          </label>}
+          {hasPermission(me, 'products.create') && <button className="btn" onClick={() => setShow(true)}>
             <PackagePlus size={19} />
             Nuevo producto
-          </button>
+          </button>}
           {isSuperAdmin && <button className="btn-secondary text-red-700" onClick={async () => { const summary = await api<{ count: number }>('/products/bulk-delete-all/summary'); setDeleteAll({ count: summary.count, confirmation: '' }); }}><Trash2 size={18}/>Eliminar todos</button>}
         </div>
       </div>
       {selected.size > 0 && (
         <div className="bulk-action-bar">
           <b>{selected.size} seleccionados</b>
-          <button
+          {hasPermission(me, 'prices.bulkUpdate') && <button
             onClick={async () => {
               const pct = Number(prompt('Porcentaje de aumento (use negativo para disminuir)', '6'));
               if (!Number.isFinite(pct) || !branchId) return;
@@ -313,9 +316,9 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
             }}
           >
             Aumentar precios
-          </button>
+          </button>}
           <button onClick={() => (window.location.href = appPath('/labels'))}>Generar etiquetas</button>
-          <button
+          {hasPermission(me, 'products.disable') && <button
             className="text-red-700"
             onClick={async () => {
               if (!confirm(`Se eliminarán ${selected.size} productos. ¿Continuar?`)) return;
@@ -328,7 +331,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
             }}
           >
             Desactivar
-          </button>
+          </button>}
         </div>
       )}
       {importing && <p className="mt-4 rounded-xl bg-brand-50 p-4 text-sm text-brand-800">{importing}</p>}
@@ -439,10 +442,16 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                   </td>
                   <td className="p-4">
                     <div className="flex gap-2">
-                      <a className="text-brand-600" href={appPath(`/products/${p.id}`)}>
+                      <a className="text-brand-600" href={appPath(`${currentRoute().startsWith('/cashier') ? '/cashier' : ''}/products/${p.id}`)}>
                         Ver ficha
                       </a>
-                      {branchId &&
+                      {c && hasPermission(me, 'prices.update') && <button className="text-brand-700" onClick={async () => {
+                        const next = prompt(`Nuevo precio para ${p.name}`, String(c.salePrice));
+                        if (next === null || !branchId || !Number.isFinite(Number(next)) || Number(next) < 0) return;
+                        await api(`/products/${p.id}/branches/${branchId}`, { method: 'PATCH', body: JSON.stringify({ salePrice: next }) });
+                        await load();
+                      }}>Cambiar precio</button>}
+                      {hasPermission(me, 'products.update') && branchId &&
                         !p.branchConfigs.some((config) => config.branch.id === branchId && config.enabled) && (
                           <button
                             className="text-brand-600"
@@ -456,10 +465,10 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                             Agregar a sucursal
                           </button>
                         )}
-                      <a className="text-brand-600" href={appPath(`/products/${p.id}`)}>
+                      {(hasPermission(me, 'products.update') || hasPermission(me, 'prices.update')) && <a className="text-brand-600" href={appPath(`${currentRoute().startsWith('/cashier') ? '/cashier' : ''}/products/${p.id}`)}>
                         Editar
-                      </a>
-                      {p.active && (
+                      </a>}
+                      {p.active && hasPermission(me, 'products.disable') && (
                         <button
                           className="text-red-600"
                           onClick={() => api(`/products/${p.id}`, { method: 'DELETE' }).then(load)}

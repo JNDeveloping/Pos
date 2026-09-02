@@ -22,8 +22,8 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 # Módulos parcialmente implementados
 
-- **Autenticación/RBAC:** login, refresh/logout, sesión, roles, permisos, alcance de sucursal y protecciones del último
-  superadministrador. Roles está integrado por tab/redirección en Usuarios, aunque conserva pantallas/rutas legadas.
+- **Autenticación/RBAC:** acceso explícito e independiente al Panel de caja y Panel del dueño; permisos operativos
+  granulares por rol, presets de caja básica/avanzada, alcance de sucursal y bypass/protecciones de `SUPER_ADMIN`.
 - **Inicio:** ventas hoy/ayer/mes, tickets, promedio, ganancia y margen estimados, unidades vendidas, stock,
   vencimientos, bajo margen, top productos, ventas recientes, medios de pago y gráficos de 7/30 días y por hora. Faltan
   compras recomendadas y productos de baja rotación.
@@ -65,6 +65,9 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 # Últimos cambios
 
+- 2026-09-02: se separan Panel de caja y Panel del dueño con permisos de entrada independientes. Caja incorpora un
+  espacio operativo limitado por rol para productos, precios, stock, ventas y etiquetas; el editor de roles organiza
+  permisos por panel y ofrece presets no destructivos. La migración conserva los accesos que ya tenían los roles.
 - 2026-08-30: migración de operación táctil incorpora aperturas de caja, grupos rápidos configurables y saldos de stock
   Local/Depósito; se simplifican Productos y Configuración, el fondo POS se sirve desde backend y la venta exige caja
   abierta cuando la sucursal así lo configura.
@@ -91,6 +94,8 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 - `20260819120000_server_settings`: configuración JSON por empresa y sucursal.
 - `20260830170000_pos_touch_operation`: sesiones de caja, grupos rápidos configurables y saldos por ubicación; migra el
   stock histórico existente a `SALE_FLOOR` sin borrar movimientos ni existencias.
+- `20260902120000_panel_access_permissions`: crea `panels.cashier`/`panels.admin` y los asigna de forma compatible a
+  roles que ya tenían acceso POS o capacidades administrativas, sin retirar ninguna relación existente.
 
 # Decisiones técnicas
 
@@ -99,6 +104,8 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 - `Product` es catálogo de empresa; `BranchProduct` define surtido y comercialización por sucursal.
 - Menos navegación principal: precios/costos/roles/inventario/movimientos/transferencias/órdenes se integran o redirigen.
 - Facturas siempre requieren revisión humana; el adaptador manual es el comportamiento seguro por defecto.
+- Entrar a un panel y ejecutar una acción son autorizaciones separadas: el rol necesita `panels.cashier` o
+  `panels.admin` y además el permiso funcional; el backend continúa validando cada operación.
 
 # Problemas conocidos
 

@@ -72,7 +72,7 @@ async function main() {
     });
   }
   await db.rolePermission.createMany({
-    data: ['sales.access', 'sales.create', 'sales.view', 'terminals.view', 'paymentMethods.view'].map((code) => ({
+    data: ['panels.cashier', 'sales.access', 'sales.create', 'sales.view', 'terminals.view', 'paymentMethods.view'].map((code) => ({
       roleId: roles[3].id,
       permissionId: permissionByCode.get(code)!,
     })),

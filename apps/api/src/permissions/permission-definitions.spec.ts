@@ -21,4 +21,9 @@ describe('permission catalog', () => {
   });
   it('provides UI metadata', () =>
     expect(permissionDefinitions.every((x) => x.module && x.label && Number.isInteger(x.sortOrder))).toBe(true));
+  it('separates cashier and owner panel entry permissions', () => {
+    expect(permissionCodes).toEqual(expect.arrayContaining(['panels.cashier', 'panels.admin']));
+    expect(adminPermissionCodes).toContain('panels.admin');
+    expect(adminPermissionCodes).not.toContain('panels.cashier');
+  });
 });

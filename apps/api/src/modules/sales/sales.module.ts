@@ -807,6 +807,12 @@ export class CashSessionsController {
     if (!branch) throw new BadRequestException('Sucursal inválida');
     return branch;
   }
+  @Get('branches') @RequirePermissions('sales.access') branches(@CurrentSession() s: Session) {
+    return this.db.branch.findMany({
+      where: { companyId: s.companyId, active: true, deletedAt: null, ...(s.branchId ? { id: s.branchId } : {}) },
+      orderBy: { name: 'asc' },
+    });
+  }
   @Get('bootstrap') @RequirePermissions('sales.access') async bootstrap(
     @CurrentSession() s: Session,
     @Query('branchId') branchId: string,

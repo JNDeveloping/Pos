@@ -7,6 +7,10 @@ export type PermissionDefinition = {
   active: boolean;
 };
 const modules: Record<string, string[]> = {
+  PANELS: [
+    'panels.cashier|Ingresar al panel de caja',
+    'panels.admin|Ingresar al panel de administración',
+  ],
   DASHBOARD: ['dashboard.view|Ver panel'],
   PRODUCTS: [
     'products.view|Ver productos',
@@ -130,11 +134,13 @@ export const SYSTEM_PERMISSIONS: PermissionDefinition[] = Object.entries(modules
 export const permissionDefinitions = SYSTEM_PERMISSIONS;
 export const permissionCodes = SYSTEM_PERMISSIONS.map((x) => x.code);
 export const adminPermissionCodes = permissionCodes.filter(
-  (code) => !['roles.manage', 'users.delete', 'branches.delete', 'stock.adjust'].includes(code),
+  (code) => code !== 'panels.cashier' && !['roles.manage', 'users.delete', 'branches.delete', 'stock.adjust'].includes(code),
 );
 export const managerPermissionCodes = permissionCodes.filter((code) =>
   [
     'dashboard.view',
+    'panels.admin',
+    'panels.cashier',
     'products.view',
     'products.create',
     'products.update',
