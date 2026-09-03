@@ -40,6 +40,8 @@ import { PosSettingsPage } from './pages/PosSettings';
 import { CashierLayout } from './components/CashierLayout';
 import { CashierHome } from './pages/CashierHome';
 import { OwnerMonitor } from './pages/OwnerMonitor';
+import { MobileAdmin } from './pages/MobileAdmin';
+import { shouldOpenMobileAdmin } from './lib/mobile-admin';
 const pages: Record<string, React.ReactNode> = {
   '/admin': <Dashboard />,
   '/branches': <Branches />,
@@ -86,6 +88,7 @@ const pages: Record<string, React.ReactNode> = {
 };
 const routePermissions: Record<string, string> = {
   '/admin': 'dashboard.view',
+  '/admin/mobile': 'products.view',
   '/owner': 'dashboard.view',
   '/products': 'products.view',
   '/admin/products': 'products.view',
@@ -184,6 +187,10 @@ export default function App() {
     }
     void configureBranch();
   }, [me]);
+  useEffect(() => {
+    if (me && hasPermission(me, 'panels.admin') && shouldOpenMobileAdmin(route))
+      window.location.replace(`${import.meta.env.BASE_URL}admin/mobile`);
+  }, [me, route]);
   if (!ready)
     return <div className="grid min-h-screen place-items-center text-brand-700">Preparando este dispositivo…</div>;
   if (!me || route === '/login')
@@ -251,6 +258,7 @@ export default function App() {
     );
   }
   if (route === '/owner') return <><OwnerMonitor me={me}/><PwaManager/></>;
+  if (route === '/admin/mobile') return <><MobileAdmin me={me} branches={branches} initialBranchId={currentBranchId}/><PwaManager/></>;
   if (cashierRoute) {
     const cashierPage = productMatch ? <ProductDetail id={productMatch[1]} /> : route === '/cashier/products' ? <Products /> : route === '/cashier/stock' ? <Stock /> : route === '/cashier/sales' ? <SalesAdmin kind="sales" /> : route === '/cashier/labels' ? <Labels /> : <CashierHome me={me} />;
     return <><CashierLayout me={me}>{cashierPage}</CashierLayout><PwaManager /></>;

@@ -26,6 +26,7 @@ class AuditController {
   }
 }
 class LabelDto { @IsArray() @ArrayMaxSize(100) @IsUUID('4', { each: true }) productIds!: string[]; @IsString() template!: string; @IsUUID() branchId!: string; }
+class PrintedLabelsDto { @IsArray() @ArrayMaxSize(200) @IsUUID('4', { each: true }) ids!: string[]; }
 @Controller('labels')
 class LabelsController {
   constructor(private db: PrismaService) {}
@@ -34,6 +35,36 @@ class LabelsController {
     if (!branch || (s.branchId && s.branchId !== dto.branchId)) return { generated: 0 };
     await this.db.auditLog.create({ data: { companyId: s.companyId, branchId: dto.branchId, userId: s.sub, entityType: 'BRANCH', entityId: dto.branchId, action: 'LABEL_GENERATED', metadata: { template: dto.template, productIds: dto.productIds } } });
     return { generated: dto.productIds.length };
+  }
+  @Get('pending') @RequirePermissions('labels.view') async pending(
+    @CurrentSession() s: Session,
+    @Query('branchId') branchId?: string,
+  ) {
+    const effectiveBranch = s.branchId ?? branchId;
+    if (!effectiveBranch) return [];
+    return this.db.labelPrintQueue.findMany({
+      where: { companyId: s.companyId, branchId: effectiveBranch, status: 'PENDING' },
+      include: {
+        product: { select: { id: true, name: true, internalCode: true, barcodes: { take: 1, orderBy: { isPrimary: 'desc' } } } },
+        user: { select: { firstName: true, lastName: true } },
+        branch: { select: { name: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 500,
+    });
+  }
+  @Post('pending/printed') @RequirePermissions('labels.generate') async printed(
+    @CurrentSession() s: Session,
+    @Body() dto: PrintedLabelsDto,
+  ) {
+    return this.db.$transaction(async (tx) => {
+      const rows = await tx.labelPrintQueue.findMany({
+        where: { id: { in: dto.ids }, companyId: s.companyId, branchId: s.branchId ?? undefined, status: 'PENDING' },
+      });
+      await tx.labelPrintQueue.updateMany({ where: { id: { in: rows.map((row) => row.id) } }, data: { status: 'PRINTED', printedAt: new Date() } });
+      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: rows[0]?.branchId, userId: s.sub, entityType: 'LABEL_QUEUE', entityId: rows[0]?.id ?? s.companyId, action: 'PRICE_LABELS_PRINTED', metadata: { count: rows.length } } });
+      return { printed: rows.length };
+    });
   }
 }
 @Module({ controllers: [AuditController, LabelsController] })

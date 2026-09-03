@@ -43,6 +43,11 @@ class AdjustmentDto {
   @IsString() @MinLength(3) reason!: string;
   @IsOptional() @IsEnum(StockLocationType) location?: StockLocationType;
 }
+class ReplenishmentDto {
+  @IsUUID() branchId!: string;
+  @IsUUID() productId!: string;
+  @IsNumber() @Min(0.001) quantity!: number;
+}
 class InventoryDto {
   @IsUUID() branchId!: string;
   @IsString() @MinLength(2) name!: string;
@@ -183,6 +188,33 @@ export class StockService {
     );
   }
 
+  replenish(s: Session, dto: ReplenishmentDto) {
+    return this.db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dto.branchId + ':' + dto.productId}))`;
+      const allowed = await tx.branchProduct.findFirst({
+        where: { branchId: dto.branchId, productId: dto.productId, branch: { companyId: s.companyId, active: true } },
+      });
+      if (!allowed || (s.branchId && s.branchId !== dto.branchId)) throw new BadRequestException('Producto o sucursal inválidos');
+      const balances = await Promise.all([StockLocationType.WAREHOUSE, StockLocationType.SALE_FLOOR].map((location) =>
+        tx.stockLocationBalance.upsert({
+          where: { branchId_productId_location: { branchId: dto.branchId, productId: dto.productId, location } },
+          create: { companyId: s.companyId, branchId: dto.branchId, productId: dto.productId, location },
+          update: {},
+        })));
+      const warehouse = balances[0], saleFloor = balances[1];
+      if (Number(warehouse.quantity) < dto.quantity) throw new BadRequestException('No hay suficiente stock en depósito');
+      await tx.stockLocationBalance.update({ where: { id: warehouse.id }, data: { quantity: { decrement: dto.quantity } } });
+      await tx.stockLocationBalance.update({ where: { id: saleFloor.id }, data: { quantity: { increment: dto.quantity } } });
+      const total = await tx.stock.findUnique({ where: { branchId_productId: { branchId: dto.branchId, productId: dto.productId } } });
+      await tx.stockMovement.createMany({ data: [
+        { companyId: s.companyId, branchId: dto.branchId, productId: dto.productId, type: StockMovementType.MANUAL_DECREASE, quantity: -dto.quantity, previousQuantity: total?.quantity ?? 0, newQuantity: total?.quantity ?? 0, reason: 'Reposición depósito → local', userId: s.sub, metadata: { from: 'WAREHOUSE', to: 'SALE_FLOOR' } },
+        { companyId: s.companyId, branchId: dto.branchId, productId: dto.productId, type: StockMovementType.MANUAL_INCREASE, quantity: dto.quantity, previousQuantity: total?.quantity ?? 0, newQuantity: total?.quantity ?? 0, reason: 'Reposición depósito → local', userId: s.sub, metadata: { from: 'WAREHOUSE', to: 'SALE_FLOOR' } },
+      ] });
+      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: dto.branchId, userId: s.sub, entityType: 'STOCK', entityId: dto.productId, action: 'STOCK_REPLENISHED', metadata: { quantity: dto.quantity, from: 'WAREHOUSE', to: 'SALE_FLOOR' } } });
+      return { quantity: dto.quantity, saleFloorQuantity: Number(saleFloor.quantity) + dto.quantity, warehouseQuantity: Number(warehouse.quantity) - dto.quantity };
+    });
+  }
+
   async receivePurchaseInTransaction(
     tx: Prisma.TransactionClient,
     s: Session,
@@ -292,6 +324,9 @@ class StockController {
   }
   @Post('adjust') @RequirePermissions('stock.adjust') adjust(@CurrentSession() s: Session, @Body() dto: AdjustmentDto) {
     return this.stock.adjust(s, dto);
+  }
+  @Post('replenish') @RequirePermissions('stock.adjust') replenish(@CurrentSession() s: Session, @Body() dto: ReplenishmentDto) {
+    return this.stock.replenish(s, dto);
   }
   @Get('expirations')
   @RequirePermissions('expirations.view')

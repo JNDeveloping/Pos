@@ -13,7 +13,13 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { BarcodeType, ChangeSource, NetContentUnit, PresentationType, Prisma, UnitType } from '@prisma/client';
 import {
   IsBoolean,
@@ -110,6 +116,7 @@ class ConfigDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
   @IsOptional() @IsBoolean() posFavorite?: boolean;
   @IsOptional() @IsBoolean() allowManualPrice?: boolean;
+  @IsOptional() @IsBoolean() queueLabel?: boolean;
   @IsOptional() @IsString() location?: string;
   @IsOptional() @IsString() shelf?: string;
   @IsOptional() @IsString() internalNotes?: string;
@@ -379,6 +386,23 @@ export class ProductsController {
       });
       return product;
     });
+  }
+  @Post('image') @RequirePermissions('products.create')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 8 * 1024 * 1024, files: 1 } }))
+  async uploadImage(@CurrentSession() s: Session, @UploadedFile() file?: { buffer: Buffer; mimetype: string }) {
+    if (!file) throw new BadRequestException('Seleccione una imagen');
+    const extensions: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+    const extension = extensions[file.mimetype];
+    if (!extension) throw new BadRequestException('Use una imagen JPG, PNG o WebP');
+    const valid = (extension === 'jpg' && file.buffer[0] === 0xff && file.buffer[1] === 0xd8) ||
+      (extension === 'png' && file.buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) ||
+      (extension === 'webp' && file.buffer.subarray(0, 4).toString() === 'RIFF' && file.buffer.subarray(8, 12).toString() === 'WEBP');
+    if (!valid) throw new BadRequestException('El archivo no contiene una imagen válida');
+    const directory = resolve(process.cwd(), 'uploads/public/products', s.companyId);
+    await mkdir(directory, { recursive: true });
+    const filename = `${randomUUID()}.${extension}`;
+    await writeFile(resolve(directory, filename), file.buffer, { flag: 'wx' });
+    return { url: `/api/uploads/products/${s.companyId}/${filename}` };
   }
   @Get('export/data') @RequirePermissions('products.export') async exportData(
     @CurrentSession() s: Session,
@@ -841,6 +865,17 @@ export class ProductsController {
             percentageChange: this.percentage(current.salePrice, price),
             source: d.source ?? ChangeSource.MANUAL,
             changedByUserId: s.sub,
+          },
+        });
+      if (current && !current.salePrice.equals(price) && d.queueLabel)
+        await tx.labelPrintQueue.create({
+          data: {
+            companyId: s.companyId,
+            branchId,
+            productId: id,
+            userId: s.sub,
+            oldPrice: current.salePrice,
+            newPrice: price,
           },
         });
       if (current && !current.cost.equals(cost))

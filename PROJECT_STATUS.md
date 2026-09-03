@@ -32,6 +32,9 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
   editar datos/barcodes, configuración comercial por sucursal, consultar stock por ubicación, vincular proveedores y
   ver una cronología real de precios, costos y movimientos. Import/export y baja masiva permanecen disponibles;
   `SUPER_ADMIN` puede aplicar soft delete eficiente a todo el catálogo con confirmación fuerte.
+- **Administración móvil:** `/admin/mobile` ofrece detección segura de teléfono, scanner de cámara, búsqueda remota,
+  ficha rápida, cambio encadenado de precios, alta mínima con foto, ajuste/reposición de stock y retorno al scanner.
+  Reutiliza los permisos y endpoints del producto completo; no descarga el catálogo ni crea un segundo maestro.
 - **Proveedores/compras:** ficha de proveedor, relación multi-proveedor y aliases, órdenes, compras, confirmación,
   actualización opt-in de costo, ingreso idempotente de stock y revisión de factura. La recomendación de compras no está.
 - **Facturas:** carga, almacenamiento validado, matching y corrección humana; sólo existe adaptador manual, sin OCR/IA
@@ -56,7 +59,7 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 # Pendientes
 
-- Completar la UI de reposición interna depósito → local y sus movimientos específicos.
+- Extender la reposición depósito → local, ya disponible desde la ficha móvil, a la pantalla Stock de escritorio.
 - Incorporar lotes/vencimientos y opciones POS avanzadas al editor consolidado de producto sin volver a duplicar
   pantallas; la configuración comercial, stock, proveedores e historial ya tienen superficies funcionales.
 - Acciones masivas faltantes: categoría, familia, proveedor, mínimo, etiquetas/exportación integradas y desactivación
@@ -69,6 +72,9 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 # Últimos cambios
 
+- 2026-09-03: se incorpora administración móvil PWA con redirección opt-out, lectura EAN/UPC/Code128 mediante cámara,
+  búsqueda paginada, alta rápida con foto, precio + historial/auditoría/cola de etiquetas en una transacción y stock por
+  ubicación. Etiquetas de escritorio incorpora la bandeja “Cambios pendientes” y la marcación de impresas.
 - 2026-09-03: se reemplazan las pestañas duplicadas o vacías de la ficha de Producto por cinco áreas funcionales. Se
   elimina la pestaña Auditoría sin contenido, el Historial consume datos reales y la tabla deja de ofrecer dos enlaces
   idénticos (Editar/Ver ficha) en favor de una única acción clara.
@@ -111,6 +117,8 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
   roles que ya tenían acceso POS o capacidades administrativas, sin retirar ninguna relación existente.
 - `20260902180000_cash_close_user_branches`: cierre de caja, permisos de alta/baja y relación multi-sucursal
   `UserBranchAccess`, con backfill compatible de usuarios y sucursales existentes.
+- `20260903120000_mobile_product_management`: cola persistente y multi-tenant de etiquetas por cambios de precio,
+  vinculada a producto, sucursal y usuario; conserva estados pendiente/impresa e índices operativos.
 
 # Decisiones técnicas
 

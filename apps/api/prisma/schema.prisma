@@ -104,6 +104,7 @@ model Company {
   settings         CompanySetting[]
   branchSettings   BranchSetting[]
   userBranchAccess UserBranchAccess[]
+  labelQueue       LabelPrintQueue[]
 }
 
 
@@ -153,6 +154,7 @@ model Branch {
   minimumMargin                   Decimal         @default(0) @db.Decimal(7, 2)
   defaultPriceListId              String?         @db.Uuid
   defaultPriceList                PriceList?      @relation(fields: [defaultPriceListId], references: [id])
+  labelQueue                      LabelPrintQueue[]
   allowDiscounts                  Boolean         @default(false)
   maxDiscount                     Decimal         @default(0) @db.Decimal(5, 2)
   allowManualPrice                Boolean         @default(false)
@@ -213,6 +215,11 @@ enum StockMovementType {
 enum StockLocationType {
   SALE_FLOOR
   WAREHOUSE
+}
+
+enum LabelQueueStatus {
+  PENDING
+  PRINTED
 }
 
 enum InventoryType {
@@ -315,6 +322,28 @@ model StockLot {
 
   @@index([branchId, productId])
   @@index([expirationDate])
+}
+
+model LabelPrintQueue {
+  id          String           @id @default(uuid()) @db.Uuid
+  companyId   String           @db.Uuid
+  branchId    String           @db.Uuid
+  productId   String           @db.Uuid
+  userId      String           @db.Uuid
+  oldPrice    Decimal          @db.Decimal(14, 2)
+  newPrice    Decimal          @db.Decimal(14, 2)
+  quantity    Int              @default(1)
+  status      LabelQueueStatus @default(PENDING)
+  printedAt   DateTime?
+  createdAt   DateTime         @default(now())
+
+  company Company @relation(fields: [companyId], references: [id])
+  branch  Branch  @relation(fields: [branchId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@index([companyId, branchId, status, createdAt])
+  @@index([productId, createdAt])
 }
 
 model Inventory {
@@ -635,6 +664,7 @@ model User {
   cashSessions          CashSession[]   @relation("CashierSessions")
   closedCashSessions    CashSession[]   @relation("ClosedCashSessions")
   branchAccesses        UserBranchAccess[]
+  labelQueue            LabelPrintQueue[]
 
   @@unique([companyId, username])
   @@unique([companyId, email])
@@ -808,6 +838,7 @@ model Product {
   purchaseOrderItems      PurchaseOrderItem[]
   purchaseItems           PurchaseItem[]
   quickGroupItems         PosQuickGroupItem[]
+  labelQueue              LabelPrintQueue[]
 
   @@unique([companyId, internalCode])
   @@index([companyId, active, name])
