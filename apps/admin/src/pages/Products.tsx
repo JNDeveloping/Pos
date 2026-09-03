@@ -442,8 +442,8 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                   </td>
                   <td className="p-4">
                     <div className="flex gap-2">
-                      <a className="text-brand-600" href={appPath(`${currentRoute().startsWith('/cashier') ? '/cashier' : ''}/products/${p.id}`)}>
-                        Ver ficha
+                      <a className="font-semibold text-brand-700" href={appPath(`${currentRoute().startsWith('/cashier') ? '/cashier' : ''}/products/${p.id}`)}>
+                        Abrir producto
                       </a>
                       {c && hasPermission(me, 'prices.update') && <button className="text-brand-700" onClick={async () => {
                         const next = prompt(`Nuevo precio para ${p.name}`, String(c.salePrice));
@@ -465,9 +465,6 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                             Agregar a sucursal
                           </button>
                         )}
-                      {(hasPermission(me, 'products.update') || hasPermission(me, 'prices.update')) && <a className="text-brand-600" href={appPath(`${currentRoute().startsWith('/cashier') ? '/cashier' : ''}/products/${p.id}`)}>
-                        Editar
-                      </a>}
                       {p.active && hasPermission(me, 'products.disable') && (
                         <button
                           className="text-red-600"

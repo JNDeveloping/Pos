@@ -28,9 +28,10 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
   última actividad, actualización cada 15 segundos); el Dashboard ofrece ventas hoy/ayer/mes, ganancia, unidades, stock,
   vencimientos, bajo margen, top productos, ventas recientes, medios de pago y gráficos de 7/30 días y por hora. Faltan
   compras recomendadas y productos de baja rotación.
-- **Productos:** pantalla y alta simplificadas en General, Venta, Stock, Proveedores y Opcional; catálogo paginado,
-  edición rápida por ficha, barcode, categorías, familia, import/export, acciones masivas e inicialización transaccional
-  de stock Local/Depósito. `SUPER_ADMIN` puede aplicar soft delete eficiente a todo el catálogo con confirmación fuerte.
+- **Productos:** catálogo paginado y editor consolidado en General, Venta, Stock, Proveedores e Historial. La ficha permite
+  editar datos/barcodes, configuración comercial por sucursal, consultar stock por ubicación, vincular proveedores y
+  ver una cronología real de precios, costos y movimientos. Import/export y baja masiva permanecen disponibles;
+  `SUPER_ADMIN` puede aplicar soft delete eficiente a todo el catálogo con confirmación fuerte.
 - **Proveedores/compras:** ficha de proveedor, relación multi-proveedor y aliases, órdenes, compras, confirmación,
   actualización opt-in de costo, ingreso idempotente de stock y revisión de factura. La recomendación de compras no está.
 - **Facturas:** carga, almacenamiento validado, matching y corrección humana; sólo existe adaptador manual, sin OCR/IA
@@ -56,7 +57,8 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 # Pendientes
 
 - Completar la UI de reposición interna depósito → local y sus movimientos específicos.
-- Completar producto único por tabs: comercial, stock por ubicación, proveedores, lotes/vencimientos, POS e historial.
+- Incorporar lotes/vencimientos y opciones POS avanzadas al editor consolidado de producto sin volver a duplicar
+  pantallas; la configuración comercial, stock, proveedores e historial ya tienen superficies funcionales.
 - Acciones masivas faltantes: categoría, familia, proveedor, mínimo, etiquetas/exportación integradas y desactivación
   robusta con preview/auditoría.
 - Compras recomendadas explicables por cobertura, venta histórica, bultos y proveedor preferido.
@@ -67,6 +69,9 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 # Últimos cambios
 
+- 2026-09-03: se reemplazan las pestañas duplicadas o vacías de la ficha de Producto por cinco áreas funcionales. Se
+  elimina la pestaña Auditoría sin contenido, el Historial consume datos reales y la tabla deja de ofrecer dos enlaces
+  idénticos (Editar/Ver ficha) en favor de una única acción clara.
 - 2026-09-02: se completa la administración de usuarios (datos, contraseña, estado, roles, sucursales y baja lógica),
   se agrega pantalla completa a todas las superficies y el login administrativo abre un monitor multi-sucursal en vivo
   con acceso explícito al Panel de admin. El resumen/monitor valida alcance de sucursales en backend.
