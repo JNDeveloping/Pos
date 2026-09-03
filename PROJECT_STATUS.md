@@ -72,6 +72,9 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 # Últimos cambios
 
+- 2026-09-03: el alta rápida móvil pasa a exigir únicamente nombre, barcode y precio; el backend asigna “Sin
+  clasificar” cuando no se elige categoría. Se corrige el submit con estado/error visible y se completa la adaptación
+  responsive para teléfonos angostos, orientación horizontal y áreas seguras.
 - 2026-09-03: se corrige el scanner móvil cuando un código no existe: espera la carga asíncrona de sucursales, exige
   coincidencia exacta de barcode, limita la consulta a 12 segundos y siempre abandona el estado “Buscando” ante vacío,
   error o timeout, permitiendo crear el producto o reintentar sin recargar.

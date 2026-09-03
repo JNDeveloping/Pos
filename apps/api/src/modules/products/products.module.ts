@@ -79,6 +79,16 @@ class ProductDto {
   @IsOptional() @IsString() @Matches(/^\d+$/, { message: 'El código debe ser numérico' }) barcode?: string;
   @IsOptional() @ValidateNested() @Type(() => ProductBranchDto) branchConfig?: ProductBranchDto;
 }
+class QuickProductDto {
+  @IsString() @Length(2, 180) name!: string;
+  @IsString() @Matches(/^\d+$/, { message: 'El código debe ser numérico' }) barcode!: string;
+  @IsNumberString() salePrice!: string;
+  @IsUUID() branchId!: string;
+  @IsOptional() @IsUUID() categoryId?: string;
+  @IsOptional() @IsNumberString() cost?: string;
+  @IsOptional() @IsNumberString() initialStock?: string;
+  @IsOptional() @IsString() imageUrl?: string;
+}
 class ProductPatchDto {
   @IsOptional() @IsString() @Length(2, 50) internalCode?: string;
   @IsOptional() @IsString() @Length(2, 180) name?: string;
@@ -242,6 +252,34 @@ export class ProductsController {
           branchConfigs: product.branchConfigs.map(({ cost: _cost, ...config }) => config),
         }));
     return { data: safeData, meta: { page: q.page, limit: q.limit, total, pages: Math.ceil(total / q.limit) } };
+  }
+  @Post('quick') @RequirePermissions('products.create') async quickCreate(
+    @CurrentSession() s: Session,
+    @Body() d: QuickProductDto,
+  ) {
+    let categoryId = d.categoryId;
+    if (!categoryId) {
+      const category = await this.db.category.findFirst({
+        where: { companyId: s.companyId, deletedAt: null, name: { equals: 'Sin clasificar', mode: 'insensitive' } },
+      }) ?? await this.db.category.create({ data: { companyId: s.companyId, name: 'Sin clasificar' } });
+      categoryId = category.id;
+    }
+    return this.create(s, {
+      name: d.name,
+      barcode: d.barcode,
+      categoryId,
+      imageUrl: d.imageUrl,
+      unitType: UnitType.UNIT,
+      taxRate: '21',
+      branchConfig: {
+        branchId: d.branchId,
+        salePrice: d.salePrice,
+        cost: d.cost,
+        saleFloorStock: d.initialStock,
+        warehouseStock: '0',
+        enabled: true,
+      },
+    });
   }
   @Post('bulk-disable') @RequirePermissions('products.disable') async bulkDisable(
     @CurrentSession() s: Session,
