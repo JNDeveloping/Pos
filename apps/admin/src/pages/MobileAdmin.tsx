@@ -4,7 +4,7 @@ import { api, hasPermission, type Me } from '../lib/api';
 import { branchContext } from '../lib/branch-context';
 import { API } from '../lib/api';
 import { appPath } from '../lib/navigation';
-import { setDesktopAdminPreference } from '../lib/mobile-admin';
+import { resolveMobileBranchId, setDesktopAdminPreference } from '../lib/mobile-admin';
 import type { IScannerControls } from '@zxing/browser';
 
 type Branch = { id: string; name: string };
@@ -19,27 +19,36 @@ export function MobileAdmin({ me, branches, initialBranchId }: { me: Me; branche
   const [view, setView] = useState<View>('home'), [branchId, setBranchId] = useState(initialBranchId ?? branches[0]?.id ?? '');
   const [product, setProduct] = useState<Product>(), [stock, setStock] = useState<Stock>(), [barcode, setBarcode] = useState('');
   const [query, setQuery] = useState(''), [results, setResults] = useState<Product[]>([]), [categories, setCategories] = useState<Ref[]>([]), [suppliers, setSuppliers] = useState<Ref[]>([]);
-  const [message, setMessage] = useState(''), [priceMode, setPriceMode] = useState(false), [cameraActive, setCameraActive] = useState(false);
+  const [message, setMessage] = useState(''), [priceMode, setPriceMode] = useState(false), [cameraActive, setCameraActive] = useState(false), [searching, setSearching] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null), scannerRef = useRef<IScannerControls | undefined>(undefined), scannedRef = useRef(false);
   const config = product?.branchConfigs.find((item) => item.branch.id === branchId);
 
   useEffect(() => { branchContext.set(branchId); }, [branchId]);
+  useEffect(() => { setBranchId((current) => resolveMobileBranchId(current, initialBranchId, branches)); }, [branches, initialBranchId]);
   useEffect(() => { if (view === 'create' && !categories.length) void Promise.all([api<Ref[]>('/categories'), hasPermission(me, 'suppliers.view') ? api<{ data: Ref[] }>('/suppliers').then((x) => x.data) : Promise.resolve([])]).then(([c, s]) => { setCategories(c); setSuppliers(s); }); }, [categories.length, me, view]);
   useEffect(() => { const timer = window.setTimeout(() => { if (view === 'search' && query.trim().length >= 2) void api<ProductPage>(`/products?branchId=${branchId}&search=${encodeURIComponent(query)}&limit=12`).then((x) => setResults(x.data)); }, 350); return () => clearTimeout(timer); }, [branchId, query, view]);
   useEffect(() => () => stopCamera(), []);
 
   async function lookup(code: string) {
-    stopCamera(); setMessage('Buscando producto…');
-    const page = await api<ProductPage>(`/products?branchId=${branchId}&search=${encodeURIComponent(code)}&limit=10`);
-    const found = page.data.find((item) => item.barcodes.some((entry) => entry.barcode === code)) ?? page.data[0];
-    if (!found) { setBarcode(code); setProduct(undefined); setMessage('Producto no encontrado'); setView('create'); navigator.vibrate?.([80, 50, 80]); return; }
-    await openProduct(found); navigator.vibrate?.(60);
+    const normalized = code.trim();
+    if (!normalized) { setMessage('Ingresá o escaneá un código.'); scannedRef.current = false; return; }
+    if (!branchId) { setMessage('Esperando la sucursal habilitada. Intentá nuevamente en un momento.'); scannedRef.current = false; return; }
+    stopCamera(); setSearching(true); setMessage('Buscando producto…');
+    try {
+      const page = await api<ProductPage>(`/products?branchId=${branchId}&search=${encodeURIComponent(normalized)}&limit=10`, { signal: AbortSignal.timeout(12000) });
+      const found = page.data.find((item) => item.barcodes.some((entry) => entry.barcode === normalized));
+      if (!found) { setBarcode(normalized); setProduct(undefined); setMessage('Producto no encontrado'); setView('create'); navigator.vibrate?.([80, 50, 80]); return; }
+      await openProduct(found); navigator.vibrate?.(60);
+    } catch (error) {
+      setMessage((error as Error).name === 'TimeoutError' ? 'La búsqueda tardó demasiado. Revisá la conexión y volvé a intentar.' : (error as Error).message);
+      setView('scan'); scannedRef.current = false;
+    } finally { setSearching(false); }
   }
   async function openProduct(found: Product) {
     setProduct(found); setMessage(''); setView('product');
     if (hasPermission(me, 'stock.view')) {
-      const rows = await api<Stock[]>(`/stock?branchId=${branchId}&search=${encodeURIComponent(found.internalCode)}`);
-      setStock(rows.find((row) => row.productId === found.id));
+      try { const rows = await api<Stock[]>(`/stock?branchId=${branchId}&search=${encodeURIComponent(found.internalCode)}`); setStock(rows.find((row) => row.productId === found.id)); }
+      catch { setStock(undefined); setMessage('Producto encontrado. No se pudo cargar el stock en este momento.'); }
     }
   }
   async function startCamera() {
@@ -87,13 +96,13 @@ export function MobileAdmin({ me, branches, initialBranchId }: { me: Me; branche
     <header><div><small>ADMIN MÓVIL</small><b>{me.company.name}</b></div><button onClick={() => { setDesktopAdminPreference(true); location.href = appPath('/admin'); }}>Ver versión de escritorio</button></header>
     <section className="mobile-admin-context"><select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select><span>{me.user.firstName} {me.user.lastName}</span></section>
     {view !== 'home' && <button className="mobile-back" onClick={() => { stopCamera(); setView('home'); }}><ChevronLeft/>Inicio</button>}
-    {message && <div className="mobile-message">{message}</div>}
+    {message && <div className="mobile-message">{searching && <span className="mobile-spinner"/>}{message}</div>}
     {view === 'home' && <section className="mobile-actions">
       <Action icon={Camera} title="Escanear producto" onClick={() => void startCamera()}/><Action icon={Search} title="Buscar producto" onClick={() => setView('search')}/>
       {hasPermission(me, 'products.create') && hasPermission(me, 'prices.update') && <Action icon={PackagePlus} title="Crear producto" onClick={() => { setBarcode(''); setView('create'); }}/>} {hasPermission(me, 'prices.update') && <Action icon={Barcode} title="Cambio rápido de precios" onClick={() => { setPriceMode(true); void startCamera(); }}/>} 
       {hasPermission(me, 'stock.view') && <Action icon={Boxes} title="Control de stock" onClick={() => setView('search')}/>} {hasPermission(me, 'labels.view') && <a className="mobile-action" href={appPath('/labels')}><Tags/><b>Etiquetas pendientes</b></a>}
     </section>}
-    {view === 'scan' && <section className="mobile-scanner"><div className="scanner-frame"><video ref={videoRef} muted playsInline/>{!cameraActive && <Barcode size={70}/>}<i/></div><p>Apuntá al código de barras. La cámara trasera se selecciona automáticamente.</p><form onSubmit={(e) => { e.preventDefault(); void lookup(String(new FormData(e.currentTarget).get('barcode'))); }}><input name="barcode" inputMode="numeric" autoFocus placeholder="Ingresar código"/><button className="mobile-primary">Buscar</button></form></section>}
+    {view === 'scan' && <section className="mobile-scanner"><div className="scanner-frame"><video ref={videoRef} muted playsInline/>{!cameraActive && <Barcode size={70}/>}<i/></div><p>Apuntá al código de barras. La cámara trasera se selecciona automáticamente.</p><form onSubmit={(e) => { e.preventDefault(); void lookup(String(new FormData(e.currentTarget).get('barcode'))); }}><input name="barcode" inputMode="numeric" autoFocus placeholder="Ingresar código" disabled={searching}/><button className="mobile-primary" disabled={searching}>{searching ? 'Buscando…' : 'Buscar'}</button></form></section>}
     {view === 'search' && <section><label className="mobile-search"><Search/><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nombre, código o barcode"/></label><div className="mobile-results">{results.map((item) => <button key={item.id} onClick={() => void openProduct(item)}><b>{item.name}</b><small>{item.internalCode} · {item.barcodes[0]?.barcode}</small></button>)}</div></section>}
     {view === 'product' && product && <ProductCard product={product} config={config} stock={stock} me={me} onPrice={() => setView('price')} onStock={() => setView('stock')} onNext={nextScan}/>} 
     {view === 'price' && product && config && <section className="mobile-form"><h1>Nuevo precio</h1><p>{product.name}</p><div className="price-before">Actual: <b>${cash(config.salePrice)}</b></div><form onSubmit={savePrice}><label>Nuevo precio<input name="price" type="number" inputMode="decimal" min="0" step="0.01" autoFocus required/></label><button className="mobile-primary">Guardar {priceMode ? 'y siguiente' : 'precio'}</button></form></section>}

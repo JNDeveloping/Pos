@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { setDesktopAdminPreference, shouldOpenMobileAdmin } from './mobile-admin';
+import { resolveMobileBranchId, setDesktopAdminPreference, shouldOpenMobileAdmin } from './mobile-admin';
 describe('detección del administrador móvil', () => {
   const values = new Map<string,string>();
   beforeEach(() => {
@@ -14,5 +14,10 @@ describe('detección del administrador móvil', () => {
   it('respeta la preferencia de escritorio', () => {
     setDesktopAdminPreference(true);
     expect(shouldOpenMobileAdmin('/admin', 390, 'iPhone')).toBe(false);
+  });
+  it('selecciona la sucursal cuando las opciones llegan después de renderizar', () => {
+    expect(resolveMobileBranchId('', undefined, [])).toBe('');
+    expect(resolveMobileBranchId('', undefined, [{ id: 'central' }])).toBe('central');
+    expect(resolveMobileBranchId('central', 'otra', [{ id: 'central' }])).toBe('central');
   });
 });

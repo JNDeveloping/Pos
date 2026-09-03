@@ -12,3 +12,8 @@ export function setDesktopAdminPreference(value: boolean) {
 export function shouldOpenMobileAdmin(route: string, width?: number, userAgent?: string) {
   return route === '/admin' && !prefersDesktopAdmin() && isMobileAdminDevice(width, userAgent);
 }
+export function resolveMobileBranchId(current: string, initial: string | undefined, branches: { id: string }[]) {
+  if (branches.some((branch) => branch.id === current)) return current;
+  if (initial && branches.some((branch) => branch.id === initial)) return initial;
+  return branches[0]?.id ?? '';
+}

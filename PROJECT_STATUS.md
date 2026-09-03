@@ -72,6 +72,9 @@ documentación anterior registra smoke tests manuales; la cobertura automatizada
 
 # Últimos cambios
 
+- 2026-09-03: se corrige el scanner móvil cuando un código no existe: espera la carga asíncrona de sucursales, exige
+  coincidencia exacta de barcode, limita la consulta a 12 segundos y siempre abandona el estado “Buscando” ante vacío,
+  error o timeout, permitiendo crear el producto o reintentar sin recargar.
 - 2026-09-03: se incorpora administración móvil PWA con redirección opt-out, lectura EAN/UPC/Code128 mediante cámara,
   búsqueda paginada, alta rápida con foto, precio + historial/auditoría/cola de etiquetas en una transacción y stock por
   ubicación. Etiquetas de escritorio incorpora la bandeja “Cambios pendientes” y la marcación de impresas.
