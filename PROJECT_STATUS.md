@@ -51,10 +51,9 @@ El script normal de build de la API también exige que exista `.env`, incluso cu
   legadas. Al cambiar sucursal en el layout, `Stock` no recarga porque su efecto no depende de la sucursal seleccionada.
 - **Compras:** no hay recomendaciones explicables. Las altas de compra/orden cargan sólo los primeros 100 productos y
   carecen de búsqueda remota, por lo que no son operables con catálogos grandes.
-- **Etiquetas:** se corrigió la hoja en blanco al imprimir, la cola respeta su cantidad y cada alta de producto con
-  sucursal se agrega automáticamente como pendiente. Todavía son cuatro plantillas CSS nominales; faltan medidas
-  físicas/presets requeridos, cantidades configurables por producto y un preview profesional. En la cola, imprimir no
-  marca automáticamente; requiere una acción posterior separada.
+- **Etiquetas:** se corrigió la hoja en blanco, la cola respeta su cantidad y cada alta con sucursal se agrega como
+  pendiente. Hay tres diseños físicos A4: Fleje (14 precios normales), Cartel FyV (9 carteles para frutas/verduras) y
+  A5 Liqui (liquidación/oferta). En la cola, imprimir no marca automáticamente; requiere una acción posterior separada.
 - **Sucursales:** tres tabs de la ficha (`ETIQUETAS`, `USUARIOS`, `PRODUCTOS`) son textos informativos, no superficies
   funcionales. **Auditoría:** consulta datos reales y traduce acciones conocidas, pero filtra sólo por código y conserva
   detalles JSON técnicos.
@@ -113,4 +112,6 @@ El script normal de build de la API también exige que exista `.env`, incluso cu
   backend paginada sin descargar el catálogo.
 - Las etiquetas recuperan visibilidad exclusiva en CSS de impresión y esperan el render antes de abrir el diálogo. Toda
   alta con configuración de sucursal crea, dentro de la misma transacción, una etiqueta pendiente con el precio inicial.
-- Sin migraciones ni cambios de permisos. Se mantiene pendiente el rediseño profesional de etiquetas en milímetros.
+- Se reemplazan las plantillas genéricas por Fleje, Cartel FyV y A5 Liqui, con composición en milímetros, precio sin
+  impuestos, precio por unidad de medida y densidades de 14 y 9 carteles por hoja A4 según corresponda.
+- Sin migraciones ni cambios de permisos. Queda pendiente calibrar márgenes contra el modelo físico de cada impresora.

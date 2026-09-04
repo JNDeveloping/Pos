@@ -272,6 +272,7 @@
     @apply order-3;
   }
 }
+@page { size: A4 portrait; margin: 0; }
 @media print {
   body * {
     visibility: hidden !important;
@@ -486,52 +487,49 @@
   main {
     padding: 0 !important;
   }
-  .print-grid {
+  .print-sheet {
     display: grid !important;
     visibility: visible !important;
     position: absolute;
     inset: 0;
-    width: 100%;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 4mm;
+    width: 210mm;
+    margin: 0;
   }
-  .print-grid * { visibility: visible !important; }
-  .print-label {
-    break-inside: avoid;
-    border: 1px solid #111;
-    padding: 5mm;
-    text-align: center;
-    min-height: 45mm;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-  }
-  .print-label h2 {
-    font-size: 16pt;
-    font-weight: 700;
-  }
-  .print-label .price {
-    display: block;
-    font-size: 26pt;
-    margin: 3mm 0;
-  }
-  .print-label .offer {
-    color: #b91c1c;
-    font-size: 18pt;
-  }
-  .label-template-a5_offer,
-  .label-template-a4_offer {
-    grid-template-columns: 1fr;
-  }
-  .label-template-a5_offer .print-label {
-    min-height: 130mm;
-  }
-  .label-template-a4_offer .print-label {
-    min-height: 270mm;
-  }
+  .print-sheet, .print-sheet * { visibility: visible !important; box-sizing: border-box; color: #000 !important; }
+  .print-template-fleje { grid-template-columns: repeat(2, 101mm); grid-auto-rows: 39mm; gap: 2mm 4mm; padding: 6mm 2mm; }
+  .label-fleje { break-inside: avoid; overflow: hidden; padding: 1.5mm 2mm; border-bottom: .2mm dashed #999; font-family: Arial, sans-serif; }
+  .label-fleje h2 { height: 7mm; overflow: hidden; font-size: 11pt; font-weight: 500; text-transform: uppercase; white-space: nowrap; }
+  .label-fleje-body { display: grid; grid-template-columns: 15mm 1fr 10mm; align-items: end; gap: 1mm; }
+  .label-meta { display: flex; flex-direction: column; align-self: stretch; justify-content: center; font-size: 5pt; }
+  .label-main-price { display: flex; align-items: flex-start; justify-content: center; font-size: 38pt; font-weight: 800; line-height: .95; letter-spacing: -1.5mm; }
+  .label-main-price small { margin: 1.5mm 1mm 0 0; font-size: 14pt; font-weight: 700; letter-spacing: 0; }
+  .label-fleje-body > div:nth-child(2) > p { text-align: center; font-size: 7pt; }
+  .label-tax { display: block; margin-top: .5mm; text-align: center; font-size: 5.5pt; white-space: nowrap; }
+  .label-barcode { display: flex; height: 25mm; flex-direction: column; justify-content: flex-end; overflow: hidden; }
+  .label-barcode i { width: 8mm; height: 20mm; background: repeating-linear-gradient(90deg,#000 0 .25mm,transparent .25mm .55mm,#000 .55mm 1mm,transparent 1mm 1.3mm); }
+  .label-barcode small { font-size: 4.5pt; writing-mode: vertical-rl; }
+  .print-template-cartel_fyv { grid-template-columns: repeat(3, 68mm); grid-auto-rows: 94mm; gap: 0; padding: 4mm 3mm; }
+  .label-fyv { position: relative; break-inside: avoid; overflow: hidden; padding: 3mm 2mm; text-align: center; font-family: Arial, sans-serif; }
+  .label-fold { height: 17mm; padding-top: 4mm; color: #666 !important; font-size: 7pt; font-weight: 700; }
+  .label-cut { border-top: .25mm dashed #999; }
+  .label-fresh { margin-top: 7mm; font-size: 10pt; }
+  .label-fyv h2 { height: 22mm; margin-top: 4mm; overflow: hidden; font-size: 17pt; line-height: 1.15; text-transform: uppercase; }
+  .label-fyv .label-main-price { font-size: 34pt; }
+  .label-fyv footer { display: flex; justify-content: space-between; margin-top: 2mm; font-size: 5.5pt; }
+  .print-template-a5_liqui { display: block !important; width: 148mm; min-height: 210mm; padding: 7mm; }
+  .label-liqui { width: 134mm; height: 196mm; break-after: page; overflow: hidden; text-align: center; font-family: Arial, sans-serif; }
+  .label-liqui h3 { margin-top: 17mm; border: .7mm solid #000; font-size: 29pt; font-weight: 500; }
+  .label-waste { margin-top: 5mm; font-size: 13pt; font-weight: 700; }
+  .label-liqui .label-main-price { margin-top: 14mm; font-size: 76pt; }
+  .label-liqui .label-main-price small { font-size: 30pt; }
+  .label-liqui h2 { margin-top: 10mm; font-size: 27pt; font-weight: 400; text-transform: uppercase; }
+  .label-liqui-footer { display: flex; align-items: end; justify-content: space-around; margin-top: 16mm; }
+  .label-liqui-footer span { display: flex; min-width: 43mm; flex-direction: column; border: .4mm solid #000; border-radius: 2mm; font-size: 9pt; }
+  .label-liqui-footer s { font-size: 20pt; }
+  .label-liqui > .label-tax { margin-top: 5mm; font-size: 8pt; }
 }
 @media screen {
-  .print-grid {
+  .print-sheet {
     display: none;
   }
 }
