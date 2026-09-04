@@ -488,9 +488,14 @@
   }
   .print-grid {
     display: grid !important;
+    visibility: visible !important;
+    position: absolute;
+    inset: 0;
+    width: 100%;
     grid-template-columns: repeat(3, 1fr);
     gap: 4mm;
   }
+  .print-grid * { visibility: visible !important; }
   .print-label {
     break-inside: avoid;
     border: 1px solid #111;

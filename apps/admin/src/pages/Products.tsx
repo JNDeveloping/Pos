@@ -1,5 +1,6 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, FileSpreadsheet, PackagePlus, Search, Trash2, X } from 'lucide-react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
+import { Camera, ChevronLeft, ChevronRight, FileSpreadsheet, PackagePlus, Search, Trash2, X } from 'lucide-react';
+import type { IScannerControls } from '@zxing/browser';
 import { api, hasPermission, type Me } from '../lib/api';
 import { branchContext } from '../lib/branch-context';
 import { appPath, currentRoute } from '../lib/navigation';
@@ -42,16 +43,17 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     [importing, setImporting] = useState(''),
     [refreshing, setRefreshing] = useState(false),
     [loadError, setLoadError] = useState(''),
-    [selected, setSelected] = useState<Set<string>>(new Set());
+    [selected, setSelected] = useState<Set<string>>(new Set()), [scannerOpen, setScannerOpen] = useState(false), [cameraActive, setCameraActive] = useState(false);
+  const scannerVideo = useRef<HTMLVideoElement>(null), scannerControls = useRef<IScannerControls | undefined>(undefined), scanned = useRef(false);
   const [dirty, setDirty] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [me, setMe] = useState<Me>();
   const [deleteAll, setDeleteAll] = useState<{ count: number; confirmation: string }>();
-  const load = async () => {
+  const load = async (requestedSearch = search, requestedPage = page) => {
     setRefreshing(true);
     setLoadError('');
     try {
-      const params = new URLSearchParams({ search, page: String(page), limit: '20' });
+      const params = new URLSearchParams({ search: requestedSearch, page: String(requestedPage), limit: '20' });
       if (branchId && enabledFilter !== 'all') {
         params.set('branchId', branchId);
         params.set('enabled', enabledFilter);
@@ -86,6 +88,21 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
+  useEffect(() => () => stopScanner(), []);
+  async function startScanner() {
+    setScannerOpen(true); setLoadError(''); scanned.current = false;
+    try {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      if (!scannerVideo.current) return;
+      const { BrowserMultiFormatReader } = await import('@zxing/browser');
+      scannerControls.current = await new BrowserMultiFormatReader().decodeFromConstraints({ video: { facingMode: { ideal: 'environment' } }, audio: false }, scannerVideo.current, (result) => {
+        if (!result || scanned.current) return;
+        scanned.current = true; const code = result.getText().trim(); stopScanner(); setScannerOpen(false); setSearch(code); setPage(1); void load(code, 1);
+      });
+      setCameraActive(true);
+    } catch { stopScanner(); setLoadError('No se pudo abrir la cámara. Revisá el permiso del navegador o escribí el código manualmente.'); }
+  }
+  function stopScanner() { scannerControls.current?.stop(); scannerControls.current = undefined; setCameraActive(false); }
   async function create(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
@@ -132,7 +149,8 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     });
     setShow(false);
     setDirty(false);
-    load();
+    setImporting('Producto creado y etiqueta agregada a la cola de impresión.');
+    void load();
   }
   async function importExcel(file: File) {
     const { read, utils } = await import('xlsx');
@@ -361,6 +379,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <button type="button" className="btn-secondary" onClick={() => void startScanner()} title="Escanear código con la cámara"><Camera size={18}/><span className="hidden sm:inline">Escanear</span></button>
         <button className="btn-secondary">Buscar</button>
         {branchId && (
           <select
@@ -378,6 +397,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
           </select>
         )}
       </form>
+      {scannerOpen && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Escanear código de barras"><section className="modal-card max-w-xl"><header className="flex items-start justify-between gap-4"><div><h2 className="text-xl font-bold">Escanear código de barras</h2><p className="text-sm text-slate-500">Apuntá la cámara al código del producto.</p></div><button type="button" aria-label="Cerrar scanner" onClick={() => { stopScanner(); setScannerOpen(false); }}><X/></button></header><div className="scanner-frame mt-5"><video ref={scannerVideo} muted playsInline/>{!cameraActive && <Camera size={64}/>}<i/></div><p className="mt-4 text-center text-sm text-slate-500">La cámara trasera se elige automáticamente cuando está disponible.</p></section></div>}
       <div className="card mt-5 overflow-x-auto">
         <table className="w-full whitespace-nowrap text-left text-sm">
           <thead className="border-b bg-slate-50 text-xs uppercase text-slate-500">
@@ -459,7 +479,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                               api(`/products/${p.id}/branches/${branchId}`, {
                                 method: 'PATCH',
                                 body: JSON.stringify({ enabled: true }),
-                              }).then(load)
+                              }).then(() => load())
                             }
                           >
                             Agregar a sucursal
@@ -468,7 +488,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                       {p.active && hasPermission(me, 'products.disable') && (
                         <button
                           className="text-red-600"
-                          onClick={() => api(`/products/${p.id}`, { method: 'DELETE' }).then(load)}
+                          onClick={() => api(`/products/${p.id}`, { method: 'DELETE' }).then(() => load())}
                         >
                           Desactivar
                         </button>

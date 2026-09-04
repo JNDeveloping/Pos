@@ -51,9 +51,10 @@ El script normal de build de la API también exige que exista `.env`, incluso cu
   legadas. Al cambiar sucursal en el layout, `Stock` no recarga porque su efecto no depende de la sucursal seleccionada.
 - **Compras:** no hay recomendaciones explicables. Las altas de compra/orden cargan sólo los primeros 100 productos y
   carecen de búsqueda remota, por lo que no son operables con catálogos grandes.
-- **Etiquetas:** selección paginada y cola de cambios de precio funcionan, pero la impresión son cuatro plantillas CSS
-  nominales; faltan medidas físicas/presets requeridos, cantidades por producto y un preview profesional. En la cola,
-  imprimir no marca automáticamente; requiere una acción posterior separada.
+- **Etiquetas:** se corrigió la hoja en blanco al imprimir, la cola respeta su cantidad y cada alta de producto con
+  sucursal se agrega automáticamente como pendiente. Todavía son cuatro plantillas CSS nominales; faltan medidas
+  físicas/presets requeridos, cantidades configurables por producto y un preview profesional. En la cola, imprimir no
+  marca automáticamente; requiere una acción posterior separada.
 - **Sucursales:** tres tabs de la ficha (`ETIQUETAS`, `USUARIOS`, `PRODUCTOS`) son textos informativos, no superficies
   funcionales. **Auditoría:** consulta datos reales y traduce acciones conocidas, pero filtra sólo por código y conserva
   detalles JSON técnicos.
@@ -105,3 +106,11 @@ El script normal de build de la API también exige que exista `.env`, incluso cu
   marcadores antiguos y no crear secciones principales duplicadas.
 - No se agregó funcionalidad ni migración en esta auditoría. Próximo paso recomendado: preparar una base PostgreSQL
   aislada y una suite smoke HTTP multi-tenant antes de continuar con funcionalidades.
+
+## Cambio posterior — 2026-09-04
+
+- Productos de escritorio incorpora scanner de códigos con cámara en la búsqueda; el valor leído dispara una consulta
+  backend paginada sin descargar el catálogo.
+- Las etiquetas recuperan visibilidad exclusiva en CSS de impresión y esperan el render antes de abrir el diálogo. Toda
+  alta con configuración de sucursal crea, dentro de la misma transacción, una etiqueta pendiente con el precio inicial.
+- Sin migraciones ni cambios de permisos. Se mantiene pendiente el rediseño profesional de etiquetas en milímetros.

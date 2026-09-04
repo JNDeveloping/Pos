@@ -38,3 +38,23 @@ describe('alta rápida de producto', () => {
     }));
   });
 });
+
+describe('alta de producto', () => {
+  it('encola automáticamente una etiqueta para la sucursal configurada', async () => {
+    const tx = {
+      company: { update: jest.fn().mockResolvedValue({ productSequence: 1 }) }, product: { create: jest.fn().mockResolvedValue({ id: 'product', name: 'Yerba' }) },
+      branchProduct: { create: jest.fn() }, labelPrintQueue: { create: jest.fn() }, auditLog: { create: jest.fn() },
+    };
+    const db = {
+      category: { findFirst: jest.fn().mockResolvedValue({ id: '00000000-0000-4000-8000-000000000002' }) },
+      branch: { findFirst: jest.fn().mockResolvedValue({ id: '00000000-0000-4000-8000-000000000001' }) },
+      $transaction: jest.fn((callback) => callback(tx)),
+    };
+    const controller = new ProductsController(db as never);
+    await controller.create(
+      { sub: 'u', companyId: 'c', branchId: null, roles: [], permissions: ['products.create', 'prices.update'], tokenVersion: 0 },
+      { name: 'Yerba', categoryId: '00000000-0000-4000-8000-000000000002', unitType: 'UNIT' as never, taxRate: '21', branchConfig: { branchId: '00000000-0000-4000-8000-000000000001', salePrice: '2500' } },
+    );
+    expect(tx.labelPrintQueue.create).toHaveBeenCalledWith({ data: expect.objectContaining({ productId: 'product', branchId: '00000000-0000-4000-8000-000000000001' }) });
+  });
+});
