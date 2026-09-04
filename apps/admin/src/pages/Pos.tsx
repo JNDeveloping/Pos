@@ -23,6 +23,7 @@ import {
   linePrice,
   lineSubtotal,
   POS_SHORTCUTS,
+  paymentSummary,
   type CartLine,
   type PosProduct,
 } from '../lib/pos-cart';
@@ -32,12 +33,12 @@ import { appPath } from '../lib/navigation';
 import { API } from '../lib/api';
 
 type Method = { id: string; code: string; name: string; requiresReference: boolean; active?: boolean };
-type Terminal = { id: string; name: string; code: string; branchId: string; active?: boolean };
+type Terminal = { id: string; name: string; code: string; branchId: string; active?: boolean; printerName?: string };
 type QuickGroup = { id: string; name: string; icon?: string; buttonSize?: string; kind?: 'GROUP' | 'CATEGORY' };
 type Cashier = { id: string; firstName: string; lastName: string; username: string };
 type CashSession = { id: string; terminalId: string; cashierUserId: string; openingAmount: string; terminal: Terminal; cashier: Cashier };
 type PosAppearance = { background?: string; backgroundOpacity?: number; backgroundOverlay?: string; backgroundBlur?: number; backgroundPosition?: string };
-type Suspended = { id: string; at: string; cart: CartLine[] };
+type Suspended = { id: string; at: string; cashier: string; cart: CartLine[] };
 type Modal = 'help' | 'search' | 'edit' | 'discount' | 'suspended' | 'utilities' | 'payment' | 'closeCash' | null;
 const money = (value: number) => value.toLocaleString('es-AR', { style: 'currency', currency: 'ARS' });
 const quantity = (line: CartLine) =>
@@ -75,6 +76,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
   const [cashiers, setCashiers] = useState<Cashier[]>([]);
   const [cashierId, setCashierId] = useState(() => sessionStorage.getItem('pos-cashier-id') ?? me.user.id);
   const [openingAmount, setOpeningAmount] = useState('0');
+  const [newTerminalName, setNewTerminalName] = useState('Caja 1');
   const [closingAmount, setClosingAmount] = useState('0');
   const [closingNote, setClosingNote] = useState('');
   const [setupReady, setSetupReady] = useState(false);
@@ -146,6 +148,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
   useEffect(() => {
     localStorage.setItem('pos-suspended-sales', JSON.stringify(suspended));
   }, [suspended]);
+  useEffect(() => { if (ticket && settings.autoPrintTicket) window.setTimeout(() => window.print(), 150); }, [ticket, settings.autoPrintTicket]);
   useEffect(() => {
     const timer = setInterval(() => setClock(new Date()), 1000);
     const connected = () => setOnline(true),
@@ -261,6 +264,16 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
     } catch (error) { setMessage({ kind: 'error', text: (error as Error).message }); }
     finally { setBusy(false); }
   };
+  const createTerminal = async () => {
+    if (!branch || !newTerminalName.trim()) return;
+    setBusy(true); setMessage(undefined);
+    try {
+      const created = await api<Terminal>('/terminals', { method: 'POST', body: JSON.stringify({ branchId: branch.id, name: newTerminalName.trim(), code: `CAJA-${terminals.length + 1}`, active: true }) });
+      setTerminals((current) => [...current, created]); setTerminalId(created.id);
+      setMessage({ kind: 'ok', text: `${created.name} creada. Ya podés abrir la caja.` });
+    } catch (error) { setMessage({ kind: 'error', text: (error as Error).message }); }
+    finally { setBusy(false); }
+  };
   const closeCash = async () => {
     if (!cashSession || cart.length) return;
     setBusy(true); setMessage(undefined);
@@ -282,7 +295,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
   }, [cart, selectedId, focusScanner]);
   const suspend = useCallback(() => {
     if (!cart.length) return;
-    setSuspended((items) => [{ id: crypto.randomUUID(), at: new Date().toISOString(), cart }, ...items]);
+    setSuspended((items) => [{ id: crypto.randomUUID(), at: new Date().toISOString(), cashier: `${me.user.firstName} ${me.user.lastName}`, cart }, ...items]);
     setCart([]);
     setSelectedId(undefined);
     setModal(null);
@@ -419,10 +432,12 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
             <div><p className="eyebrow">INICIO RÁPIDO</p><h1>Abrir caja</h1><p>Elegí dónde y con quién vas a operar. Se recordará durante esta sesión.</p></div>
             <label>Sucursal habilitada<select value={branch?.id ?? ''} onChange={(event) => onBranchChange(event.target.value)}>{branches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>Sólo se muestran las sucursales habilitadas para tu usuario.</small></label>
             <label>Cajero<select value={cashierId} onChange={(event) => setCashierId(event.target.value)}>{cashiers.map((cashier) => <option key={cashier.id} value={cashier.id}>{cashier.firstName} {cashier.lastName} · {cashier.username}</option>)}</select></label>
-            <label>Terminal<select value={terminalId} onChange={(event) => setTerminalId(event.target.value)}><option value="">Crear Caja 1 ahora</option>{terminals.map((terminal) => <option key={terminal.id} value={terminal.id}>{terminal.name}</option>)}</select></label>
+            <label>Terminal<select value={terminalId} onChange={(event) => setTerminalId(event.target.value)}><option value="">Seleccionar terminal</option>{terminals.map((terminal) => <option key={terminal.id} value={terminal.id}>{terminal.name} · {terminal.code}</option>)}</select></label>
+            {!terminals.length && hasPermission(me, 'terminals.manage') && <div className="pos-quick-terminal"><label>Nombre de la nueva terminal<input value={newTerminalName} onChange={(event) => setNewTerminalName(event.target.value)}/></label><button type="button" disabled={busy || !newTerminalName.trim()} onClick={() => void createTerminal()}>CREAR TERMINAL</button></div>}
+            {!terminals.length && !hasPermission(me, 'terminals.manage') && <p className="pos-feedback error">No hay terminales configuradas. Un administrador debe crear la primera terminal.</p>}
             <label>Fondo inicial<input inputMode="decimal" type="number" min="0" step="0.01" value={openingAmount} onChange={(event) => setOpeningAmount(event.target.value)} /></label>
             {message?.kind === 'error' && <p className="pos-feedback error">{message.text}</p>}
-            {hasPermission(me, 'cashSessions.open') ? <button className="pos-open-button" disabled={busy || !branch || !cashierId} onClick={() => void openCash()}>{busy ? 'Abriendo…' : 'Dar de alta y abrir caja'}</button> : <p className="pos-feedback error">Tu rol no tiene permiso para dar de alta una caja.</p>}
+            {hasPermission(me, 'cashSessions.open') ? <button className="pos-open-button" disabled={busy || !branch || !cashierId || !terminalId} onClick={() => void openCash()}>{busy ? 'Abriendo…' : 'ABRIR CAJA'}</button> : <p className="pos-feedback error">Tu rol no tiene permiso para abrir una caja.</p>}
           </section>
         </div>
       )}
@@ -447,7 +462,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
             <section className="pos-quick-access" aria-label="Accesos rápidos por categoría">
               <div className="pos-quick-groups">
                 <button className={activeQuickGroup === 'favorites' ? 'active' : ''} onClick={() => void openQuickGroup('favorites')}>
-                  <span>★</span><b>Accesos rápidos</b>
+                  <span>★</span><b>Favoritos</b>
                 </button>
                 {quickGroups.map((group) => (
                   <button className={activeQuickGroup === group.id ? 'active' : ''} key={group.id} onClick={() => void openQuickGroup(group.id)}>
@@ -500,6 +515,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
                     <small>
                       {line.internalCode}
                       {settings.showBarcode && line.barcode ? ` · ${line.barcode}` : ''}
+                      {line.note ? ` · ${line.note}` : ''}
                     </small>
                   </div>
                   <div className="pos-quantity">
@@ -729,6 +745,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
                     manualPrice: line.manualPrice,
                     discountPercent: line.discountPercent,
                     discountAmount: line.discountAmount,
+                    note: line.note,
                   })),
                   payments,
                 }),
@@ -852,10 +869,11 @@ function EditModal({
   line?: CartLine | PosProduct;
   canPrice: boolean;
   close: () => void;
-  save: (v: { quantity: number; manualPrice?: number }) => void;
+  save: (v: { quantity: number; manualPrice?: number; note?: string }) => void;
 }) {
   const [qty, setQty] = useState(String(line && 'quantity' in line ? line.quantity : line?.isWeighted ? '' : 1)),
-    [price, setPrice] = useState(line ? linePrice(line as CartLine) : 0);
+    [price, setPrice] = useState(line ? linePrice(line as CartLine) : 0),
+    [note, setNote] = useState(line && 'note' in line ? line.note ?? '' : '');
   if (!line) return null;
   return (
     <ModalFrame title={line.isWeighted ? 'Ingresar peso' : 'Editar producto'} close={close}>
@@ -863,7 +881,7 @@ function EditModal({
         className="pos-form"
         onSubmit={(e) => {
           e.preventDefault();
-          save({ quantity: Number(qty), manualPrice: price !== Number(line.price) ? price : undefined });
+          save({ quantity: Number(qty), manualPrice: price !== Number(line.price) ? price : undefined, note: note.trim() || undefined });
         }}
       >
         <h3>{line.name}</h3>
@@ -895,6 +913,7 @@ function EditModal({
         <p>
           Subtotal estimado <b>{money(Number(qty) * price)}</b>
         </p>
+        <label>Nota opcional<input value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder="Ej. separar en dos bolsas"/></label>
         <button className="pos-pay" disabled={Number(qty) <= 0}>
           CONFIRMAR
         </button>
@@ -981,7 +1000,7 @@ function SuspendedModal({
             <button key={s.id} onClick={() => resume(s)}>
               <span>
                 <b>{new Date(s.at).toLocaleTimeString('es-AR')}</b>
-                <small>{s.cart.length} renglones</small>
+                <small>{s.cart.reduce((sum, line) => sum + line.quantity, 0).toLocaleString('es-AR')} productos · {s.cashier || 'Cajero actual'}</small>
               </span>
               <strong>{money(s.cart.reduce((n, x) => n + lineSubtotal(x), 0))}</strong>
             </button>
@@ -1069,8 +1088,7 @@ function PaymentModal({
   const [rows, setRows] = useState([
     { paymentMethodId: methods[0]?.id ?? '', amount: total, receivedAmount: total, reference: '' },
   ]);
-  const paid = rows.reduce((n, x) => n + Number(x.amount || 0), 0),
-    remaining = Math.round((total - paid) * 100) / 100;
+  const { remaining, change } = paymentSummary(total, rows.map((row) => ({ amount: Number(row.amount), receivedAmount: Number(row.receivedAmount), isCash: methods.find((item) => item.id === row.paymentMethodId)?.code === 'CASH' })));
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       const code: { [k: string]: string } = { e: 'CASH', d: 'DEBIT', c: 'CREDIT', m: 'MERCADO_PAGO', t: 'TRANSFER' };
@@ -1093,6 +1111,7 @@ function PaymentModal({
         TOTAL <b>{money(total)}</b>
       </div>
       <div className="payment-method-buttons">
+        {!methods.length && <p className="pos-feedback error">No hay medios de pago configurados. Recargá el POS o pedí a un administrador que revise la configuración.</p>}
         {methods.map((m) => (
           <button
             key={m.id}
@@ -1115,8 +1134,9 @@ function PaymentModal({
           </button>
         ))}
       </div>
-      {rows.map((row, index) => (
-        <div className="payment-row" key={index}>
+      {rows.map((row, index) => {
+        const method = methods.find((item) => item.id === row.paymentMethodId);
+        return <div className="payment-row" key={index}>
           <select
             value={row.paymentMethodId}
             onChange={(e) => setRows(rows.map((x, i) => (i === index ? { ...x, paymentMethodId: e.target.value } : x)))}
@@ -1132,16 +1152,10 @@ function PaymentModal({
             value={row.amount}
             onChange={(e) => setRows(rows.map((x, i) => (i === index ? { ...x, amount: Number(e.target.value) } : x)))}
           />
-          <input
-            type="number"
-            value={row.receivedAmount}
-            onChange={(e) =>
-              setRows(rows.map((x, i) => (i === index ? { ...x, receivedAmount: Number(e.target.value) } : x)))
-            }
-            placeholder="Recibido / referencia"
-          />
-        </div>
-      ))}
+          {method?.code === 'CASH' ? <input type="number" min={row.amount} step="0.01" value={row.receivedAmount} onChange={(e) => setRows(rows.map((x, i) => (i === index ? { ...x, receivedAmount: Number(e.target.value) } : x)))} placeholder="Efectivo recibido"/> : <input value={row.reference} required={method?.requiresReference} onChange={(e) => setRows(rows.map((x, i) => (i === index ? { ...x, reference: e.target.value } : x)))} placeholder={method?.requiresReference ? 'Referencia / comprobante' : 'Referencia opcional'}/>}
+          {rows.length > 1 && <button type="button" aria-label="Quitar medio" onClick={() => setRows(rows.filter((_, i) => i !== index))}><X/></button>}
+        </div>;
+      })}
       <button
         className="pos-add-payment"
         onClick={() =>
@@ -1162,7 +1176,8 @@ function PaymentModal({
         <span>Pendiente</span>
         <b>{money(remaining)}</b>
       </div>
-      <button className="pos-pay" disabled={busy || remaining !== 0} onClick={() => void confirm(rows)}>
+      {change > 0 && <div className="payment-change"><span>VUELTO</span><b>{money(change)}</b></div>}
+      <button className="pos-pay" disabled={busy || remaining !== 0 || !methods.length || rows.some((row) => { const method = methods.find((item) => item.id === row.paymentMethodId); return !row.paymentMethodId || (method?.requiresReference && !row.reference.trim()); })} onClick={() => void confirm(rows)}>
         {busy ? 'PROCESANDO…' : 'CONFIRMAR · ENTER'}
       </button>
     </ModalFrame>
@@ -1180,10 +1195,10 @@ function Ticket({ sale, branch, cashier, next }: { sale: any; branch?: Branch; c
       </div>
       <div className="ticket-actions">
         <button className="btn-secondary" onClick={next}>
-          Nueva venta
+          No imprimir · nueva venta
         </button>
         <button className="btn-primary" onClick={() => window.print()}>
-          Imprimir ticket
+          Imprimir / reimprimir ticket
         </button>
       </div>
       <article className="ticket">

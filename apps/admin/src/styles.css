@@ -232,6 +232,11 @@
 .payment-remaining {
   @apply flex justify-between rounded-xl bg-slate-100 p-4 text-lg;
 }
+.payment-change { display: flex; align-items: center; justify-content: space-between; border-radius: 18px; padding: 18px 22px; color: #052e16; background: #86efac; }
+.payment-change span { font-size: .8rem; font-weight: 900; letter-spacing: .12em; }
+.payment-change b { font-size: 2rem; }
+.pos-quick-terminal { display: grid; gap: 10px; padding: 14px; border: 1px solid #bbf7d0; border-radius: 14px; background: #f0fdf4; }
+.pos-quick-terminal button { min-height: 48px; border-radius: 12px; color: white; font-weight: 850; background: #15803d; }
 .ticket-screen {
   @apply min-h-screen bg-slate-100 p-6;
 }

@@ -25,10 +25,18 @@ export type CartLine = PosProduct & {
   manualPrice?: number;
   discountPercent: number;
   discountAmount: number;
+  note?: string;
 };
 export const linePrice = (line: CartLine) => line.manualPrice ?? Number(line.price);
 export const lineSubtotal = (line: CartLine) =>
   Math.max(0, linePrice(line) * line.quantity * (1 - line.discountPercent / 100) - line.discountAmount);
+export function paymentSummary(total: number, rows: { amount: number; receivedAmount?: number; isCash: boolean }[]) {
+  const paid = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  return {
+    remaining: Math.round((total - paid) * 100) / 100,
+    change: rows.reduce((sum, row) => sum + (row.isCash ? Math.max(0, Number(row.receivedAmount ?? row.amount) - row.amount) : 0), 0),
+  };
+}
 export function addProductToCart(lines: CartLine[], product: PosProduct, quantity = 1) {
   if (!(quantity > 0)) throw new Error('La cantidad debe ser mayor que cero');
   const current = lines.find((line) => line.id === product.id);

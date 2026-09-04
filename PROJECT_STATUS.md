@@ -2,7 +2,7 @@
 
 ## Alcance y verificación
 
-Se volvió a contrastar el repositorio completo (SPA, API, Prisma, 17 migraciones, permisos, rutas, scripts y tests),
+Se volvió a contrastar el repositorio completo (SPA, API, Prisma, 18 migraciones, permisos, rutas, scripts y tests),
 tomando el código ejecutable como fuente de verdad. El sistema es un piloto funcional y amplio, pero no está terminado
 de punta a punta ni fue validado en esta revisión contra PostgreSQL/Redis reales. Después de generar Prisma pasan los 67
 tests unitarios actuales (17 frontend y 50 backend), lint, typecheck, build de ambas aplicaciones y el control de
@@ -13,7 +13,7 @@ El script normal de build de la API también exige que exista `.env`, incluso cu
 
 - Monorepo npm workspaces: React 19/Vite 7/PWA bajo `/pos/`; NestJS 11/Prisma 6/PostgreSQL con prefijo `/api`; Redis es
   auxiliar y tolerante a fallos. La PWA precachea sólo shell/assets y no hay IndexedDB ni caché comercial offline.
-- El esquema conserva UUID, `Decimal`, timestamps, soft delete y separación `companyId`/`branchId`. Hay 17 migraciones
+- El esquema conserva UUID, `Decimal`, timestamps, soft delete y separación `companyId`/`branchId`. Hay 18 migraciones
   ordenadas; las últimas agregan ubicaciones de stock, caja, acceso multi-sucursal y cola de etiquetas.
 - El guard JWT es global, vuelve a consultar usuario/roles/permisos en cada request, respeta revocación por
   `tokenVersion` y mantiene bypass de `SUPER_ADMIN`. Los controladores sensibles declaran permisos y los servicios
@@ -85,7 +85,7 @@ El script normal de build de la API también exige que exista `.env`, incluso cu
 
 ## Problemas prioritarios detectados
 
-1. **Validación real pendiente:** montar PostgreSQL de prueba, aplicar las 17 migraciones y ejecutar pruebas HTTP/e2e de
+1. **Validación real pendiente:** montar PostgreSQL de prueba, aplicar las 18 migraciones y ejecutar pruebas HTTP/e2e de
    tenant/sucursal, compra→recepción, stock, caja→venta→anulación/devolución y permisos.
 2. **Fechas contables:** Dashboard calcula límites diarios con `Date`/zona del proceso; no fija
    `America/Argentina/Buenos_Aires`, por lo que hoy/ayer y series pueden cortar mal en producción UTC.
@@ -115,3 +115,17 @@ El script normal de build de la API también exige que exista `.env`, incluso cu
 - Se reemplazan las plantillas genéricas por Fleje, Cartel FyV y A5 Liqui, con composición en milímetros, precio sin
   impuestos, precio por unidad de medida y densidades de 14 y 9 carteles por hoja A4 según corresponda.
 - Sin migraciones ni cambios de permisos. Queda pendiente calibrar márgenes contra el modelo físico de cada impresora.
+
+## POS operativo — 2026-09-04
+
+- Se completó la apertura guiada por sucursal, cajero, terminal y fondo. Si no hay terminal, un usuario con
+  `terminals.manage` puede crearla en el mismo flujo; los demás reciben un error accionable.
+- Terminal incorpora impresora opcional y configuración JSON; Configuración POS administra terminales, medios de pago,
+  apariencia, modo táctil, ticket automático y grupos rápidos. Una empresa sin medios recibe seis valores iniciales:
+  Efectivo, Débito, Crédito, Transferencia, Mercado Pago y Otro.
+- El cobro admite pagos mixtos, referencia según el medio, efectivo recibido y vuelto destacado. Las líneas conservan
+  nota opcional, y la búsqueda POS suma SKU, códigos/descripciones de proveedor y aliases.
+- La venta continúa siendo una única transacción serializable con ítems, pagos, stock, terminal/cajero y auditoría. El
+  ticket permite imprimir/reimprimir, omitir impresión y comenzar inmediatamente otra venta.
+- Migración `20260904170000_pos_terminal_and_line_notes`: agrega `Terminal.printerName`, `Terminal.posConfig` y
+  `SaleItem.note`. Suspendidos continúan locales a este dispositivo; su persistencia compartida sigue pendiente.

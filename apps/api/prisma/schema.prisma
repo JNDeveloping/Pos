@@ -454,6 +454,8 @@ model Terminal {
   code           String
   name           String
   active         Boolean  @default(true)
+  printerName    String?
+  posConfig      Json?
   nextSaleNumber Int      @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -582,6 +584,7 @@ model SaleItem {
   discountAmount      Decimal          @default(0) @db.Decimal(14, 2)
   subtotal            Decimal          @db.Decimal(14, 2)
   taxRateSnapshot     Decimal          @db.Decimal(5, 2)
+  note                String?
   createdAt           DateTime         @default(now())
   returnItems         SaleReturnItem[]
 

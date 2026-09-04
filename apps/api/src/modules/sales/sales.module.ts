@@ -19,14 +19,16 @@ import {
   IsBoolean,
   IsInt,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
   Min,
   MinLength,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
-import { CurrentSession, RequirePermissions, Session } from '../../common/auth';
+import { CurrentSession, RequirePermissions, Session, sessionCan } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
 import { StockModule, StockService } from '../stock/stock.module';
 
@@ -37,6 +39,7 @@ class SaleLineDto {
   @IsOptional() @IsNumber() @Min(0) discountAmount?: number;
   @IsOptional() @IsNumber() @Min(0) manualPrice?: number;
   @IsOptional() @IsNumber() @Min(0) expectedUnitPrice?: number;
+  @IsOptional() @IsString() @MaxLength(200) note?: string;
 }
 class PaymentDto {
   @IsUUID() paymentMethodId!: string;
@@ -79,6 +82,8 @@ class TerminalDto {
   @IsString() @MinLength(1) code!: string;
   @IsString() @MinLength(2) name!: string;
   @IsOptional() @IsBoolean() active?: boolean;
+  @IsOptional() @IsString() printerName?: string;
+  @IsOptional() @IsObject() posConfig?: Record<string, unknown>;
 }
 class OpenCashSessionDto {
   @IsUUID() branchId!: string;
@@ -267,6 +272,7 @@ class SalesService {
                 discountAmount: l.amount,
                 subtotal: l.subtotal,
                 taxRateSnapshot: l.config.product.taxRate,
+                note: l.input.note?.trim() || undefined,
               })),
             },
             payments: {
@@ -621,6 +627,12 @@ export class PosCatalogService {
               { sku: { contains: q, mode: 'insensitive' } },
               { brand: { name: { contains: q, mode: 'insensitive' } } },
               { barcodes: { some: { barcode: q } } },
+              { supplierProducts: { some: { active: true, OR: [
+                { supplierCode: { contains: q, mode: 'insensitive' } },
+                { supplierBarcode: { contains: q, mode: 'insensitive' } },
+                { supplierDescription: { contains: q, mode: 'insensitive' } },
+              ] } } },
+              { supplierAliases: { some: { normalizedDescription: { contains: q.toLowerCase() } } } },
             ],
           },
       exactCode ? q : undefined,
@@ -763,9 +775,14 @@ class SalesController {
   }
 }
 @Controller('payment-methods')
-class PaymentMethodsController {
+export class PaymentMethodsController {
   constructor(private db: PrismaService) {}
-  @Get() @RequirePermissions('paymentMethods.view') list(@CurrentSession() s: Session) {
+  @Get() @RequirePermissions('sales.access') async list(@CurrentSession() s: Session) {
+    if (!(await this.db.paymentMethod.count({ where: { companyId: s.companyId } }))) {
+      await this.db.paymentMethod.createMany({ data: [
+        ['CASH', 'Efectivo'], ['DEBIT', 'Débito'], ['CREDIT', 'Crédito'], ['TRANSFER', 'Transferencia'], ['MERCADO_PAGO', 'Mercado Pago'], ['OTHER', 'Otro'],
+      ].map(([code, name], sortOrder) => ({ companyId: s.companyId, code, name, sortOrder, requiresReference: ['TRANSFER', 'MERCADO_PAGO', 'OTHER'].includes(code) })), skipDuplicates: true });
+    }
     return this.db.paymentMethod.findMany({ where: { companyId: s.companyId }, orderBy: { sortOrder: 'asc' } });
   }
   @Post() @RequirePermissions('paymentMethods.manage') create(@CurrentSession() s: Session, @Body() d: ConfigDto) {
@@ -785,18 +802,23 @@ class TerminalsController {
   @Get() @RequirePermissions('terminals.view') list(@CurrentSession() s: Session) {
     return this.db.terminal.findMany({
       where: { companyId: s.companyId, branchId: s.branchId ?? undefined },
+      include: { cashSessions: { where: { status: 'OPEN' }, take: 1, select: { id: true, openedAt: true, cashier: { select: { firstName: true, lastName: true } } } } },
       orderBy: { name: 'asc' },
     });
   }
   @Post() @RequirePermissions('terminals.manage') create(@CurrentSession() s: Session, @Body() d: TerminalDto) {
-    return this.db.terminal.create({ data: { companyId: s.companyId, ...d } });
+    return this.ownedBranch(s, d.branchId).then(() => this.db.terminal.create({ data: { companyId: s.companyId, ...d, posConfig: d.posConfig as Prisma.InputJsonValue | undefined, code: d.code.trim().toUpperCase() } }));
   }
   @Patch(':id') @RequirePermissions('terminals.manage') update(
     @CurrentSession() s: Session,
     @Param('id') id: string,
     @Body() d: TerminalDto,
   ) {
-    return this.db.terminal.updateMany({ where: { id, companyId: s.companyId }, data: d });
+    return this.ownedBranch(s, d.branchId).then(() => this.db.terminal.updateMany({ where: { id, companyId: s.companyId }, data: { ...d, posConfig: d.posConfig as Prisma.InputJsonValue | undefined, code: d.code.trim().toUpperCase() } }));
+  }
+  private async ownedBranch(s: Session, branchId: string) {
+    if (s.branchId && s.branchId !== branchId) throw new BadRequestException('Sucursal inválida');
+    if (!(await this.db.branch.count({ where: { id: branchId, companyId: s.companyId, active: true, deletedAt: null } }))) throw new BadRequestException('Sucursal inválida');
   }
 }
 
@@ -874,6 +896,7 @@ export class CashSessionsController {
       : null;
     if (!terminal) {
       if (dto.terminalId) throw new BadRequestException('Terminal inválida');
+      if (!sessionCan(s, 'terminals.manage')) throw new BadRequestException('No hay terminal configurada. Solicite a un administrador que cree una.');
       const count = await this.db.terminal.count({ where: { companyId: s.companyId, branchId: dto.branchId } });
       terminal = await this.db.terminal.create({ data: { companyId: s.companyId, branchId: dto.branchId, code: `CAJA-${count + 1}`, name: dto.terminalName?.trim() || `Caja ${count + 1}` } });
     }
