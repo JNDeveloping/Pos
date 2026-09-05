@@ -92,8 +92,8 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 
 - **Dashboard/reportes:** datos reales y monitor multi-sucursal; los límites hoy/ayer usan zona del proceso y pueden cortar
   mal en producción UTC en vez de `America/Argentina/Buenos_Aires`.
-- **Categorías/familias:** categorías tienen CRUD jerárquico. `ProductFamily` tiene modelo/API y aparece en listados, pero
-  no existe gestión/asignación completa desde el frontend.
+- **Categorías/familias:** categorías tienen CRUD jerárquico y el editor limita subcategorías a la categoría elegida.
+  `ProductFamily` tiene modelo/API y puede asignarse o quitarse al crear/editar; la gestión masiva de familias sigue pendiente.
 - **Stock escritorio:** no expone reposición local aunque API y móvil sí; operaciones secundarias muestran JSON técnico.
 - **Vencimientos:** consulta y lotes existen, pero falta una UX comercial con riesgo, valor, filtros y edición desde ficha.
 - **Compras frontend:** las altas cargan sólo los primeros 100 productos; sin búsqueda remota no escalan al catálogo real.
@@ -179,8 +179,8 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 
 ## Verificaciones de esta auditoría
 
-- Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 21 SQL.
-- Se ejecutan como controles locales: lint, typecheck, 24 tests frontend, 57 tests backend, build y `check:release`.
+- Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 22 SQL.
+- Se ejecutan como controles locales: lint, typecheck, 24 tests frontend, 58 tests backend, build y `check:release`.
 - PostgreSQL/Redis HTTP/e2e quedan **no ejecutados** por falta de servicios/credenciales en el entorno de auditoría.
 
 ## Estabilización de arquitectura — 2026-09-05
@@ -267,6 +267,21 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
   `/pos/api/socket.io`; si el upgrade no está disponible, Socket.IO conserva fallback de long polling.
 - La presencia online se mantiene en memoria del proceso API, suficiente para el despliegue actual de una instancia. Antes
   de escalar horizontalmente se necesita un adaptador Socket.IO/Redis para compartir presencia y salas entre instancias.
+
+## Productos para operación diaria — 2026-09-05
+
+- Productos queda como única superficie de catálogo: las rutas históricas Catálogo Maestro y Marcas redirigen a Productos;
+  marca permanece como atributo opcional de la ficha, sin sección principal duplicada.
+- El listado conserva paginación server-side de 20 filas, agrega búsqueda remota con debounce y protección contra respuestas
+  tardías, y filtra por categoría, familia y sucursal sin descargar el catálogo completo.
+- Alta y edición separan identidad, venta por sucursal, stock, proveedores e historial. Se incorporaron familia,
+  subcategoría dependiente y hasta 20 códigos alternativos por alta; luego pueden administrarse individualmente en la ficha.
+- Backend valida pertenencia tenant de categoría, subcategoría, familia y marca, y devuelve errores explícitos antes de
+  persistir códigos internos o barcodes duplicados. No hubo cambio de esquema ni migración en esta etapa.
+- Stock se presenta por sucursal y separado entre local, depósito, total y disponible. Las modificaciones físicas continúan
+  exclusivamente en Stock para conservar movimiento y auditoría.
+- Pendiente: prueba de carga HTTP/PostgreSQL con 50.000 productos reales; los índices trigram existentes y la paginación
+  evitan carga masiva en navegador, pero la latencia objetivo todavía no está certificada en infraestructura productiva.
 
 ## Orden de trabajo recomendado (sin implementarlo ahora)
 

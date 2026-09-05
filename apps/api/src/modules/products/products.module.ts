@@ -35,6 +35,7 @@ import {
   Min,
   Matches,
   ArrayMaxSize,
+  ArrayUnique,
   ValidateNested,
 } from 'class-validator';
 import { CurrentSession, RequirePermissions, Session, sessionCan } from '../../common/auth';
@@ -77,6 +78,8 @@ class ProductDto {
   @IsOptional() @IsBoolean() allowManualPriceDefault?: boolean;
   @IsOptional() @IsString() notes?: string;
   @IsOptional() @IsString() @Matches(/^\d+$/, { message: 'El código debe ser numérico' }) barcode?: string;
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @ArrayUnique() @IsString({ each: true })
+  @Matches(/^\d+$/, { each: true, message: 'Los códigos alternativos deben ser numéricos' }) alternativeBarcodes?: string[];
   @IsOptional() @ValidateNested() @Type(() => ProductBranchDto) branchConfig?: ProductBranchDto;
 }
 class QuickProductDto {
@@ -96,7 +99,7 @@ class ProductPatchDto {
   @IsOptional() @IsUUID() categoryId?: string;
   @IsOptional() @IsUUID() subcategoryId?: string;
   @IsOptional() @IsUUID() brandId?: string;
-  @IsOptional() @IsUUID() familyId?: string;
+  @IsOptional() @IsUUID() familyId?: string | null;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsEnum(UnitType) unitType?: UnitType;
   @IsOptional() @IsNumberString() taxRate?: string;
@@ -137,6 +140,7 @@ class ListQuery {
   @IsOptional() @IsUUID() categoryId?: string;
   @IsOptional() @IsUUID() brandId?: string;
   @IsOptional() @IsUUID() subcategoryId?: string;
+  @IsOptional() @IsUUID() familyId?: string;
   @IsOptional() @IsEnum(PresentationType) presentationType?: PresentationType;
   @IsOptional() @Transform(optionalBoolean) @IsBoolean() withoutPrice?: boolean;
   @IsOptional() @Transform(optionalBoolean) @IsBoolean() withoutCost?: boolean;
@@ -209,6 +213,7 @@ export class ProductsController {
       ...(q.categoryId ? { categoryId: q.categoryId } : {}),
       ...(q.brandId ? { brandId: q.brandId } : {}),
       ...(q.subcategoryId ? { subcategoryId: q.subcategoryId } : {}),
+      ...(q.familyId ? { familyId: q.familyId } : {}),
       ...(q.presentationType ? { presentationType: q.presentationType } : {}),
       ...(q.withoutBarcode ? { barcodes: { none: {} } } : {}),
       ...(branchConditions.length ? { AND: branchConditions } : {}),
@@ -342,9 +347,12 @@ export class ProductsController {
     return { ...p, branchConfigs: p.branchConfigs.map(({ cost: _cost, ...config }) => config) };
   }
   @Post() @RequirePermissions('products.create') async create(@CurrentSession() s: Session, @Body() d: ProductDto) {
-    await this.validateRefs(s, d.categoryId, d.brandId, d.subcategoryId);
-    if (d.caseBarcode) await this.ensureBarcodeAvailable(s, d.caseBarcode);
-    if (d.barcode) await this.ensureBarcodeAvailable(s, d.barcode);
+    await this.validateRefs(s, d.categoryId, d.brandId, d.subcategoryId, d.familyId);
+    if (d.internalCode) await this.ensureInternalCodeAvailable(s, d.internalCode);
+    const requestedBarcodes = [d.barcode, ...(d.alternativeBarcodes ?? []), d.caseBarcode].filter(Boolean) as string[];
+    if (new Set(requestedBarcodes).size !== requestedBarcodes.length)
+      throw new BadRequestException('Los códigos de barras del producto no pueden repetirse');
+    await Promise.all(requestedBarcodes.map((barcode) => this.ensureBarcodeAvailable(s, barcode)));
     if (d.branchConfig) {
       const branch = await this.db.branch.findFirst({
         where: { id: d.branchConfig.branchId, companyId: s.companyId, active: true, deletedAt: null },
@@ -356,7 +364,7 @@ export class ProductsController {
         throw new ForbiddenException('No tiene permiso para modificar precios');
     }
     return this.db.$transaction(async (tx) => {
-      const { barcode, branchConfig, ...productInput } = d;
+      const { barcode, alternativeBarcodes, branchConfig, ...productInput } = d;
       const sequence = d.internalCode
         ? undefined
         : await tx.company.update({
@@ -375,6 +383,16 @@ export class ProductsController {
       if (barcode)
         await tx.productBarcode.create({
           data: { companyId: s.companyId, productId: product.id, barcode, isPrimary: true },
+        });
+      if (alternativeBarcodes?.length)
+        await tx.productBarcode.createMany({
+          data: alternativeBarcodes.map((alternative) => ({
+            companyId: s.companyId,
+            productId: product.id,
+            barcode: alternative,
+            type: BarcodeType.OTHER,
+            isPrimary: false,
+          })),
         });
       if (d.caseBarcode)
         await tx.productBarcode.create({
@@ -724,8 +742,13 @@ export class ProductsController {
   ) {
     await this.owned(s, id);
     const before = await this.owned(s, id);
+    if (d.internalCode && d.internalCode.toUpperCase() !== before.internalCode)
+      await this.ensureInternalCodeAvailable(s, d.internalCode, id);
     if (d.caseBarcode && d.caseBarcode !== before.caseBarcode) await this.ensureBarcodeAvailable(s, d.caseBarcode, id);
-    if (d.categoryId) await this.validateRefs(s, d.categoryId, d.brandId, d.subcategoryId);
+    if (d.categoryId)
+      await this.validateRefs(s, d.categoryId, d.brandId, d.subcategoryId, d.familyId ?? undefined);
+    else if (d.familyId)
+      await this.validateFamily(s, d.familyId);
     return this.db.$transaction(async (tx) => {
       const product = await tx.product.update({
         where: { id },
@@ -1005,8 +1028,8 @@ export class ProductsController {
   private json(value: unknown) {
     return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
   }
-  private async validateRefs(s: Session, categoryId: string, brandId?: string, subcategoryId?: string) {
-    const [c, b, subcategory] = await Promise.all([
+  private async validateRefs(s: Session, categoryId: string, brandId?: string, subcategoryId?: string, familyId?: string) {
+    const [c, b, subcategory, family] = await Promise.all([
       this.db.category.findFirst({ where: { id: categoryId, companyId: s.companyId, deletedAt: null } }),
       brandId ? this.db.brand.findFirst({ where: { id: brandId, companyId: s.companyId, deletedAt: null } }) : true,
       subcategoryId
@@ -1014,11 +1037,24 @@ export class ProductsController {
             where: { id: subcategoryId, companyId: s.companyId, parentId: categoryId, deletedAt: null },
           })
         : true,
+      familyId ? this.db.productFamily.findFirst({ where: { id: familyId, companyId: s.companyId, active: true } }) : true,
     ]);
-    if (!c || !b || !subcategory) throw new BadRequestException('Categoría, subcategoría o marca inválida');
+    if (!c || !b || !subcategory || !family)
+      throw new BadRequestException('Categoría, subcategoría, familia o marca inválida');
+  }
+  private async validateFamily(s: Session, familyId: string) {
+    const family = await this.db.productFamily.findFirst({ where: { id: familyId, companyId: s.companyId, active: true } });
+    if (!family) throw new BadRequestException('Familia inválida');
+  }
+  private async ensureInternalCodeAvailable(s: Session, internalCode: string, productId?: string) {
+    const conflict = await this.db.product.findFirst({
+      where: { companyId: s.companyId, internalCode: internalCode.toUpperCase(), ...(productId ? { id: { not: productId } } : {}) },
+      select: { id: true },
+    });
+    if (conflict) throw new BadRequestException('El código interno ya pertenece a otro producto');
   }
   private async ensureBarcodeAvailable(s: Session, barcode: string, productId?: string) {
-    if (!/^\d+$/.test(barcode)) throw new BadRequestException('El código de bulto debe ser numérico');
+    if (!/^\d+$/.test(barcode)) throw new BadRequestException('El código de barras debe ser numérico');
     const conflict = await this.db.productBarcode.findFirst({
       where: { companyId: s.companyId, barcode, ...(productId ? { productId: { not: productId } } : {}) },
     });

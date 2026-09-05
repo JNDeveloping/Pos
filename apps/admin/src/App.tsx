@@ -136,6 +136,9 @@ const routePermissions: Record<string, string> = {
 export default function App() {
   const [rawRoute, setRawRoute] = useState(currentRoute);
   const redirects: Record<string, string> = {
+    '/catalog': '/products',
+    '/admin/catalog': '/products',
+    '/brands': '/products',
     '/admin/prices': '/products?tab=pricing',
     '/admin/costs': '/products?tab=pricing',
     '/admin/roles': '/users?tab=roles',

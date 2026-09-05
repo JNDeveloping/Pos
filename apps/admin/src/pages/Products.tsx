@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, ChevronLeft, ChevronRight, FileSpreadsheet, PackagePlus, Search, Trash2, X } from 'lucide-react';
 import type { IScannerControls } from '@zxing/browser';
 import { api, hasPermission, type Me } from '../lib/api';
@@ -36,6 +36,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     [page, setPage] = useState(1),
     [show, setShow] = useState(false),
     [categories, setCategories] = useState<Ref[]>([]),
+    [families, setFamilies] = useState<Ref[]>([]),
     [branches, setBranches] = useState<Ref[]>([]),
     [branchId, setBranchId] = useState<string>(),
     [enabledFilter, setEnabledFilter] = useState<'all' | 'true' | 'false'>(mode === 'branch' ? 'true' : 'all'),
@@ -43,13 +44,20 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     [importing, setImporting] = useState(''),
     [refreshing, setRefreshing] = useState(false),
     [loadError, setLoadError] = useState(''),
+    [categoryFilter, setCategoryFilter] = useState(''),
+    [familyFilter, setFamilyFilter] = useState(''),
+    [newCategoryId, setNewCategoryId] = useState(''),
     [selected, setSelected] = useState<Set<string>>(new Set()), [scannerOpen, setScannerOpen] = useState(false), [cameraActive, setCameraActive] = useState(false);
   const scannerVideo = useRef<HTMLVideoElement>(null), scannerControls = useRef<IScannerControls | undefined>(undefined), scanned = useRef(false);
   const [dirty, setDirty] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [me, setMe] = useState<Me>();
   const [deleteAll, setDeleteAll] = useState<{ count: number; confirmation: string }>();
-  const load = async (requestedSearch = search, requestedPage = page) => {
+  const requestSequence = useRef(0);
+  const searchRef = useRef(search), pageRef = useRef(page), searchMounted = useRef(false);
+  searchRef.current = search; pageRef.current = page;
+  const load = useCallback(async (requestedSearch = searchRef.current, requestedPage = pageRef.current) => {
+    const request = ++requestSequence.current;
     setRefreshing(true);
     setLoadError('');
     try {
@@ -58,23 +66,36 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         params.set('branchId', branchId);
         params.set('enabled', enabledFilter);
       }
-      setResult(await api<Page>(`/products?${params}`));
+      if (categoryFilter) params.set('categoryId', categoryFilter);
+      if (familyFilter) params.set('familyId', familyFilter);
+      const next = await api<Page>(`/products?${params}`);
+      if (request === requestSequence.current) setResult(next);
     } catch (cause) {
-      setLoadError(cause instanceof Error ? cause.message : 'No se pudieron cargar los productos');
+      if (request === requestSequence.current)
+        setLoadError(cause instanceof Error ? cause.message : 'No se pudieron cargar los productos');
     } finally {
-      setRefreshing(false);
+      if (request === requestSequence.current) setRefreshing(false);
     }
-  };
+  }, [branchId, categoryFilter, enabledFilter, familyFilter]);
   useEffect(() => {
     void load();
-  }, [page, branchId, enabledFilter, mode]);
+  }, [load, mode]);
+  useEffect(() => {
+    if (!searchMounted.current) { searchMounted.current = true; return; }
+    const timer = window.setTimeout(() => {
+      setPage(1);
+      void load(search, 1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [load, search]);
   useEffect(() => {
     void api<Me>('/auth/me').then(async (current) => {
       setMe(current); setIsSuperAdmin(current.user.roles.some((role) => role.code === 'SUPER_ADMIN'));
-      return Promise.all([hasPermission(current, 'categories.view') ? api<Ref[]>('/categories') : Promise.resolve([]), api<Ref[]>(hasPermission(current, 'branches.view') ? '/branches' : '/cash-sessions/branches')]);
+      return Promise.all([hasPermission(current, 'categories.view') ? api<Ref[]>('/categories') : Promise.resolve([]), api<Ref[]>(hasPermission(current, 'branches.view') ? '/branches' : '/cash-sessions/branches'), api<Ref[]>('/product-families')]);
     })
-      .then(([c, br]) => {
+      .then(([c, br, productFamilies]) => {
         setCategories(c);
+        setFamilies(productFamilies);
         setBranches(br);
         const selected = branchContext.get();
         setBranchId(br.length === 1 ? br[0].id : selected);
@@ -113,6 +134,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         name: f.get('name'),
         categoryId: f.get('categoryId'),
         subcategoryId: f.get('subcategoryId') || undefined,
+        familyId: f.get('familyId') || undefined,
         brandId: f.get('brandId') || undefined,
         unitType: f.get('unitType'),
         taxRate: f.get('taxRate'),
@@ -130,6 +152,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         allowManualPriceDefault: f.get('allowManualPriceDefault') === 'on',
         notes: f.get('notes') || undefined,
         barcode: f.get('barcode') || undefined,
+        alternativeBarcodes: String(f.get('alternativeBarcodes') ?? '').split(/[\s,;]+/).map((code) => code.trim()).filter(Boolean),
         branchConfig: branchId
           ? {
               branchId,
@@ -365,7 +388,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         Importar al catálogo y habilitar automáticamente para la sucursal actual
       </label>
       <form
-        className="card mt-7 flex gap-3 p-4"
+        className="card mt-7 flex flex-wrap gap-3 p-4"
         onSubmit={(e) => {
           e.preventDefault();
           setPage(1);
@@ -374,13 +397,15 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
       >
         <Search className="ml-2 self-center text-slate-400" />
         <input
-          className="min-w-0 flex-1 border-0 focus:ring-0"
-          placeholder="Buscar por nombre, código interno o código de barras…"
+          className="min-w-[240px] flex-1 border-0 focus:ring-0"
+          placeholder="Nombre, código interno, SKU, barcode o código de proveedor…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         <button type="button" className="btn-secondary" onClick={() => void startScanner()} title="Escanear código con la cámara"><Camera size={18}/><span className="hidden sm:inline">Escanear</span></button>
         <button className="btn-secondary">Buscar</button>
+        <select value={categoryFilter} aria-label="Filtrar categoría" onChange={(event) => { setCategoryFilter(event.target.value); setPage(1); }}><option value="">Todas las categorías</option>{categories.filter((item) => !item.parentId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+        <select value={familyFilter} aria-label="Filtrar familia" onChange={(event) => { setFamilyFilter(event.target.value); setPage(1); }}><option value="">Todas las familias</option>{families.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
         {branchId && (
           <select
             value={enabledFilter}
@@ -527,7 +552,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
               <div>
                 <h2 className="text-2xl font-bold">Nuevo producto</h2>
                 <p className="text-slate-500">
-                  Se crea en el catálogo maestro y se habilita sólo en la sucursal actual.
+                  Identidad general y datos comerciales de la sucursal, sin duplicar catálogos.
                 </p>
               </div>
               <button
@@ -541,8 +566,11 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
               <fieldset><legend>General</legend><div className="grid gap-3 md:grid-cols-2">
                 <label>Nombre<input name="name" required placeholder="Ej. Banana" /></label>
                 <label>Código interno<input name="internalCode" placeholder="Automático si se deja vacío" /></label>
-                <label>Barcode<input name="barcode" inputMode="numeric" placeholder="Escanear o escribir" /></label>
-                <label>Categoría<select name="categoryId" required><option value="">Seleccionar</option>{categories.filter((item) => !item.parentId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Barcode principal<input name="barcode" inputMode="numeric" pattern="[0-9]+" placeholder="Escanear o escribir" /></label>
+                <label>Códigos alternativos<input name="alternativeBarcodes" inputMode="numeric" placeholder="Separados por coma o espacio" /></label>
+                <label>Categoría<select name="categoryId" required value={newCategoryId} onChange={(event) => setNewCategoryId(event.target.value)}><option value="">Seleccionar</option>{categories.filter((item) => !item.parentId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Subcategoría<select name="subcategoryId" disabled={!newCategoryId}><option value="">Sin subcategoría</option>{categories.filter((item) => item.parentId === newCategoryId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Familia<select name="familyId"><option value="">Sin familia</option>{families.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                 <label className="md:col-span-2">URL de imagen<input name="imageUrl" type="url" placeholder="https://…" /></label>
               </div></fieldset>
               <fieldset><legend>Venta</legend><div className="grid gap-3 md:grid-cols-3">

@@ -7,7 +7,7 @@ type Ref = { id: string; name: string; parentId?: string };
 type ProductBarcode = { id: string; barcode: string; type: string; isPrimary: boolean };
 type BranchConfig = { id: string; branch: Ref; enabled: boolean; cost?: string; salePrice: string; margin: string; stockMinimum: string; posFavorite: boolean; allowManualPrice?: boolean; location?: string; shelf?: string };
 type SupplierLink = { id: string; supplierId: string; supplierCode?: string; supplierBarcode?: string; supplierDescription?: string; lastCost?: string; unitsPerCase?: number; minimumOrderQuantity?: string; preferredSupplier: boolean; active: boolean; supplier: Ref };
-type Product = { id: string; internalCode: string; name: string; shortName?: string; description?: string; notes?: string; category: Ref; subcategory?: Ref; brand?: Ref; unitType: string; presentationType?: string; netContent?: string; netContentUnit?: string; taxRate: string; imageUrl?: string; sku?: string; unitsPerCase?: number; caseBarcode?: string; isWeighted: boolean; allowManualPriceDefault: boolean; active: boolean; barcodes: ProductBarcode[]; branchConfigs: BranchConfig[]; supplierProducts: SupplierLink[] };
+type Product = { id: string; internalCode: string; name: string; shortName?: string; description?: string; notes?: string; category: Ref; subcategory?: Ref; brand?: Ref; family?: Ref; unitType: string; presentationType?: string; netContent?: string; netContentUnit?: string; taxRate: string; imageUrl?: string; sku?: string; unitsPerCase?: number; caseBarcode?: string; isWeighted: boolean; allowManualPriceDefault: boolean; active: boolean; barcodes: ProductBarcode[]; branchConfigs: BranchConfig[]; supplierProducts: SupplierLink[] };
 type StockRow = { productId: string; quantity: number; reservedQuantity: number; availableQuantity: number; saleFloorQuantity: number; warehouseQuantity: number; minimumStock: number };
 type HistoryRow = { id: string; createdAt: string; branch?: Ref; changedBy?: { firstName: string; lastName: string }; oldPrice?: string; newPrice?: string; oldCost?: string; newCost?: string; type?: string; quantity?: string; reason?: string };
 type SupplierPage = { data: Ref[] };
@@ -27,8 +27,10 @@ export function ProductDetail({ id }: { id: string }) {
   const [me, setMe] = useState<Me>();
   const [categories, setCategories] = useState<Ref[]>([]);
   const [brands, setBrands] = useState<Ref[]>([]);
+  const [families, setFamilies] = useState<Ref[]>([]);
   const [suppliers, setSuppliers] = useState<Ref[]>([]);
   const [tab, setTab] = useState<Tab>('general');
+  const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const [branchId, setBranchId] = useState('');
   const [stock, setStock] = useState<StockRow>();
   const [history, setHistory] = useState<HistoryRow[]>([]);
@@ -37,12 +39,13 @@ export function ProductDetail({ id }: { id: string }) {
 
   const load = async () => {
     const current = await api<Me>('/auth/me');
-    const [p, c, b] = await Promise.all([
+    const [p, c, b, f] = await Promise.all([
       api<Product>(`/products/${id}`),
       hasPermission(current, 'categories.view') ? api<Ref[]>('/categories') : Promise.resolve([]),
       hasPermission(current, 'brands.view') ? api<Ref[]>('/brands') : Promise.resolve([]),
+      api<Ref[]>('/product-families'),
     ]);
-    setMe(current); setProduct(p); setCategories(c); setBrands(b);
+    setMe(current); setProduct(p); setCategories(c); setBrands(b); setFamilies(f); setSelectedCategoryId(p.category.id);
     setBranchId((value) => value || p.branchConfigs[0]?.branch.id || '');
   };
   useEffect(() => { void load().catch((e: Error) => setMessage(e.message)); }, [id]);
@@ -76,6 +79,7 @@ export function ProductDetail({ id }: { id: string }) {
     await run(() => api(`/products/${id}`, { method: 'PATCH', body: JSON.stringify({
       name: form.get('name'), shortName: form.get('shortName') || undefined, internalCode: form.get('internalCode'),
       categoryId: form.get('categoryId'), subcategoryId: form.get('subcategoryId') || undefined, brandId: form.get('brandId') || undefined,
+      familyId: form.get('familyId') || null,
       imageUrl: form.get('imageUrl') || undefined, description: form.get('description') || undefined, notes: form.get('notes') || undefined,
       sku: form.get('sku') || undefined, unitType: form.get('unitType'), presentationType: form.get('presentationType') || undefined,
       netContent: form.get('netContent') || undefined, netContentUnit: form.get('netContentUnit') || undefined,
@@ -119,7 +123,7 @@ export function ProductDetail({ id }: { id: string }) {
       <div className="mb-6"><h2 className="text-xl font-bold">Información esencial</h2><p className="text-sm text-slate-500">Identidad, presentación y códigos en una sola pantalla.</p></div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <label>Nombre<input className={field} name="name" defaultValue={product.name} required/></label><label>Nombre corto<input className={field} name="shortName" defaultValue={product.shortName}/></label><label>Código interno<input className={field} name="internalCode" defaultValue={product.internalCode} required/></label>
-        <label>Categoría<select className={field} name="categoryId" defaultValue={product.category.id}>{categories.filter((x) => !x.parentId).map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label><label>Subcategoría<select className={field} name="subcategoryId" defaultValue={product.subcategory?.id ?? ''}><option value="">Sin subcategoría</option>{categories.filter((x) => x.parentId === product.category.id).map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label><label>Marca<select className={field} name="brandId" defaultValue={product.brand?.id ?? ''}><option value="">Sin marca</option>{brands.map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
+        <label>Categoría<select className={field} name="categoryId" value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)}>{categories.filter((x) => !x.parentId).map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label><label>Subcategoría<select className={field} name="subcategoryId" key={selectedCategoryId} defaultValue={product.subcategory?.parentId === selectedCategoryId ? product.subcategory.id : ''}><option value="">Sin subcategoría</option>{categories.filter((x) => x.parentId === selectedCategoryId).map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label><label>Familia<select className={field} name="familyId" defaultValue={product.family?.id ?? ''}><option value="">Sin familia</option>{families.map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label><label>Marca (opcional)<select className={field} name="brandId" defaultValue={product.brand?.id ?? ''}><option value="">Sin marca</option>{brands.map((x) => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
         <label>SKU<input className={field} name="sku" defaultValue={product.sku}/></label><label>Unidad de venta<select className={field} name="unitType" defaultValue={product.unitType}>{['UNIT','KG','GRAM','LITER','METER'].map((x) => <option key={x}>{x}</option>)}</select></label><label>Presentación<select className={field} name="presentationType" defaultValue={product.presentationType ?? ''}><option value="">Sin especificar</option>{['UNIT','BOTTLE','CAN','PACKAGE','BOX','BAG','JAR','SACHET','PACK','TRAY','CASE','OTHER'].map((x) => <option key={x}>{x}</option>)}</select></label>
         <label>Contenido<input className={field} name="netContent" type="number" step="0.001" defaultValue={product.netContent}/></label><label>Unidad de contenido<select className={field} name="netContentUnit" defaultValue={product.netContentUnit ?? ''}><option value="">—</option>{['ML','L','G','KG','UN','M','CM','OTHER'].map((x) => <option key={x}>{x}</option>)}</select></label><label>IVA %<input className={field} name="taxRate" type="number" step="0.01" defaultValue={product.taxRate}/></label>
         <label>Unidades por bulto<input className={field} name="unitsPerCase" type="number" min="1" defaultValue={product.unitsPerCase}/></label><label>Barcode del bulto<input className={field} name="caseBarcode" defaultValue={product.caseBarcode}/></label><label>URL de imagen<input className={field} name="imageUrl" type="url" defaultValue={product.imageUrl}/></label>
