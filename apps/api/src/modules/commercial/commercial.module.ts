@@ -25,7 +25,7 @@ class ChangeDto {
 }
 class BulkItemDto { @IsUUID() productId!: string; }
 class BulkDto extends ChangeDto {
-  @IsArray() @ArrayMaxSize(1000) @ValidateNested({ each: true }) @Type(() => BulkItemDto) products!: BulkItemDto[];
+  @IsArray() @ArrayMaxSize(5000) @ValidateNested({ each: true }) @Type(() => BulkItemDto) products!: BulkItemDto[];
   @IsString() operation!: 'PERCENT' | 'AMOUNT' | 'MARGIN';
 }
 class PriceListDto {
@@ -93,7 +93,7 @@ class CommercialService {
       }
       await tx.auditLog.create({ data: { companyId: s.companyId, branchId: dto.branchId, userId: s.sub, entityType: 'BRANCH', entityId: dto.branchId, action: kind === 'PRICE' ? 'BULK_PRICE_UPDATE' : 'BULK_COST_UPDATE', metadata: { products: changes.length, operation: dto.operation, value: dto.value } } });
       return { updated: changes.length };
-    });
+    }, { timeout: 120000 });
   }
   private percent(oldValue: Prisma.Decimal, newValue: Prisma.Decimal) { return oldValue.eq(0) ? new Prisma.Decimal(0) : newValue.minus(oldValue).div(oldValue).mul(100).toDecimalPlaces(2); }
   private json(value: unknown) { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }

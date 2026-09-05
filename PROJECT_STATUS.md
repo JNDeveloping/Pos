@@ -180,7 +180,7 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 ## Verificaciones de esta auditoría
 
 - Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 22 SQL.
-- Se ejecutan como controles locales: lint, typecheck, 24 tests frontend, 58 tests backend, build y `check:release`.
+- Se ejecutan como controles locales: lint, typecheck, 24 tests frontend, 60 tests backend, build y `check:release`.
 - PostgreSQL/Redis HTTP/e2e quedan **no ejecutados** por falta de servicios/credenciales en el entorno de auditoría.
 
 ## Estabilización de arquitectura — 2026-09-05
@@ -282,6 +282,20 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
   exclusivamente en Stock para conservar movimiento y auditoría.
 - Pendiente: prueba de carga HTTP/PostgreSQL con 50.000 productos reales; los índices trigram existentes y la paginación
   evitan carga masiva en navegador, pero la latencia objetivo todavía no está certificada en infraestructura productiva.
+
+## Edición masiva de productos — 2026-09-05
+
+- La selección se conserva al paginar y los filtros de búsqueda, categoría, familia y estado sobreviven durante la pestaña.
+  También puede resolver en servidor hasta 5.000 IDs que coincidan con el filtro actual. El editor masivo admite esos lotes
+  para categoría/subcategoría, familia, proveedor, stock mínimo, estado, habilitación por sucursal, precio y baja lógica.
+- Toda operación exige una vista previa. Los cambios económicos reutilizan el cálculo del backend y muestran precio anterior
+  y nuevo antes de aplicar; al confirmar conservan `PriceHistory`/`CostHistory` y una auditoría consolidada del lote.
+- Los cambios maestros y operativos se validan por tenant, sucursal y relaciones antes de una única transacción; proveedor
+  se agrega sin reemplazar vínculos existentes. La UI queda ocupada con feedback mientras el servidor procesa el lote.
+- Vaciar el catálogo permanece como baja lógica administrativa: ahora exige `products.purgeAll` y escribir exactamente
+  `VACIAR PRODUCTOS`. `products.bulkUpdate` gobierna el resto de cambios masivos. Ambos permisos requieren sincronización.
+- No hubo cambio de schema ni migración. Pendiente: medir un lote de 5.000 productos contra PostgreSQL real y ajustar el
+  tiempo máximo si la infraestructura productiva no completa las historias económicas dentro de 120 segundos.
 
 ## Orden de trabajo recomendado (sin implementarlo ahora)
 

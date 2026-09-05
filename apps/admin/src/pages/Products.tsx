@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, ChevronLeft, ChevronRight, FileSpreadsheet, PackagePlus, Search, Trash2, X } from 'lucide-react';
+import { Camera, ChevronLeft, ChevronRight, FileSpreadsheet, PackagePlus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import type { IScannerControls } from '@zxing/browser';
 import { api, hasPermission, type Me } from '../lib/api';
 import { branchContext } from '../lib/branch-context';
@@ -30,29 +30,41 @@ type Product = {
   netContentUnit?: string;
 };
 type Page = { data: Product[]; meta: { page: number; pages: number; total: number } };
+type SupplierPage = { data: Ref[] };
+type BulkPreview = { count: number; sample: { id?: string; productId?: string; internalCode?: string; code?: string; name: string; oldPrice?: string; newPrice?: string }[] };
+type BulkOperation = 'CATEGORY' | 'FAMILY' | 'SUPPLIER' | 'MINIMUM' | 'STATE' | 'PRICE' | 'DELETE';
+const filtersKey = 'rincon.products.filters';
+function savedFilters() {
+  try { return JSON.parse(sessionStorage.getItem(filtersKey) ?? '{}') as { search?: string; categoryId?: string; familyId?: string; enabled?: 'all' | 'true' | 'false' }; }
+  catch { return {}; }
+}
 export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
+  const initialFilters = useRef(savedFilters()).current;
   const [result, setResult] = useState<Page>(),
-    [search, setSearch] = useState(''),
+    [search, setSearch] = useState(initialFilters.search ?? ''),
     [page, setPage] = useState(1),
     [show, setShow] = useState(false),
     [categories, setCategories] = useState<Ref[]>([]),
     [families, setFamilies] = useState<Ref[]>([]),
+    [suppliers, setSuppliers] = useState<Ref[]>([]),
     [branches, setBranches] = useState<Ref[]>([]),
     [branchId, setBranchId] = useState<string>(),
-    [enabledFilter, setEnabledFilter] = useState<'all' | 'true' | 'false'>(mode === 'branch' ? 'true' : 'all'),
+    [enabledFilter, setEnabledFilter] = useState<'all' | 'true' | 'false'>(initialFilters.enabled ?? (mode === 'branch' ? 'true' : 'all')),
     [enableDuringImport, setEnableDuringImport] = useState(mode === 'branch'),
     [importing, setImporting] = useState(''),
     [refreshing, setRefreshing] = useState(false),
     [loadError, setLoadError] = useState(''),
-    [categoryFilter, setCategoryFilter] = useState(''),
-    [familyFilter, setFamilyFilter] = useState(''),
+    [categoryFilter, setCategoryFilter] = useState(initialFilters.categoryId ?? ''),
+    [familyFilter, setFamilyFilter] = useState(initialFilters.familyId ?? ''),
     [newCategoryId, setNewCategoryId] = useState(''),
     [selected, setSelected] = useState<Set<string>>(new Set()), [scannerOpen, setScannerOpen] = useState(false), [cameraActive, setCameraActive] = useState(false);
   const scannerVideo = useRef<HTMLVideoElement>(null), scannerControls = useRef<IScannerControls | undefined>(undefined), scanned = useRef(false);
   const [dirty, setDirty] = useState(false);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [me, setMe] = useState<Me>();
   const [deleteAll, setDeleteAll] = useState<{ count: number; confirmation: string }>();
+  const [bulkOpen, setBulkOpen] = useState(false), [bulkOperation, setBulkOperation] = useState<BulkOperation>('CATEGORY');
+  const [bulkCategoryId, setBulkCategoryId] = useState('');
+  const [bulkPreview, setBulkPreview] = useState<BulkPreview>(), [bulkBusy, setBulkBusy] = useState(false);
   const requestSequence = useRef(0);
   const searchRef = useRef(search), pageRef = useRef(page), searchMounted = useRef(false);
   searchRef.current = search; pageRef.current = page;
@@ -89,8 +101,11 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     return () => window.clearTimeout(timer);
   }, [load, search]);
   useEffect(() => {
+    sessionStorage.setItem(filtersKey, JSON.stringify({ search, categoryId: categoryFilter, familyId: familyFilter, enabled: enabledFilter }));
+  }, [categoryFilter, enabledFilter, familyFilter, search]);
+  useEffect(() => {
     void api<Me>('/auth/me').then(async (current) => {
-      setMe(current); setIsSuperAdmin(current.user.roles.some((role) => role.code === 'SUPER_ADMIN'));
+      setMe(current);
       return Promise.all([hasPermission(current, 'categories.view') ? api<Ref[]>('/categories') : Promise.resolve([]), api<Ref[]>(hasPermission(current, 'branches.view') ? '/branches' : '/cash-sessions/branches'), api<Ref[]>('/product-families')]);
     })
       .then(([c, br, productFamilies]) => {
@@ -305,6 +320,53 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
     link.click();
     URL.revokeObjectURL(url);
   }
+  function bulkBody(form: FormData) {
+    const common = { productIds: [...selected], branchId };
+    if (bulkOperation === 'CATEGORY') return { ...common, categoryId: form.get('categoryId'), subcategoryId: form.get('subcategoryId') || null };
+    if (bulkOperation === 'FAMILY') return { ...common, familyId: form.get('familyId') || null };
+    if (bulkOperation === 'SUPPLIER') return { ...common, supplierId: form.get('supplierId') };
+    if (bulkOperation === 'MINIMUM') return { ...common, stockMinimum: String(form.get('stockMinimum')) };
+    if (bulkOperation === 'STATE') return { ...common, active: form.get('active') === 'true', ...(branchId ? { enabled: form.get('enabled') === 'true' } : {}) };
+    return common;
+  }
+  async function previewBulk(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBulkBusy(true); setLoadError('');
+    try {
+      const form = new FormData(event.currentTarget);
+      if (bulkOperation === 'DELETE') {
+        setBulkPreview({ count: selected.size, sample: (result?.data ?? []).filter((row) => selected.has(row.id)).map((row) => ({ id: row.id, name: row.name, internalCode: row.internalCode })).slice(0, 50) });
+      } else if (bulkOperation === 'PRICE') {
+        if (!branchId) throw new Error('Seleccione una sucursal');
+        setBulkPreview(await api<BulkPreview>('/prices/bulk/preview', { method: 'POST', body: JSON.stringify({ branchId, operation: form.get('priceOperation'), value: String(form.get('priceValue')), products: [...selected].map((productId) => ({ productId })) }) }));
+      } else setBulkPreview(await api<BulkPreview>('/products/bulk/preview', { method: 'POST', body: JSON.stringify(bulkBody(form)) }));
+    } catch (error) { setLoadError((error as Error).message); } finally { setBulkBusy(false); }
+  }
+  async function openBulkEditor() {
+    setBulkOpen(true); setBulkPreview(undefined);
+    if (!suppliers.length && hasPermission(me, 'suppliers.view'))
+      try { setSuppliers((await api<SupplierPage>('/suppliers')).data); } catch (error) { setLoadError((error as Error).message); }
+  }
+  async function selectFiltered() {
+    setBulkBusy(true); setLoadError('');
+    try {
+      const params = new URLSearchParams({ search, ...(categoryFilter ? { categoryId: categoryFilter } : {}), ...(familyFilter ? { familyId: familyFilter } : {}) });
+      if (branchId) { params.set('branchId', branchId); if (enabledFilter !== 'all') params.set('enabled', enabledFilter); }
+      const result = await api<{ productIds: string[]; total: number; limited: boolean }>(`/products/bulk-selection?${params}`);
+      setSelected(new Set(result.productIds));
+      setImporting(result.limited ? `Se seleccionaron los primeros 5.000 de ${result.total.toLocaleString('es-AR')} productos filtrados.` : `${result.total.toLocaleString('es-AR')} productos filtrados seleccionados.`);
+    } catch (error) { setLoadError((error as Error).message); } finally { setBulkBusy(false); }
+  }
+  async function applyBulk() {
+    const form = document.querySelector<HTMLFormElement>('#bulk-product-form'); if (!form) return;
+    setBulkBusy(true);
+    try {
+      const data = new FormData(form);
+      if (bulkOperation === 'DELETE') await api('/products/bulk-disable', { method: 'POST', body: JSON.stringify({ productIds: [...selected] }) });
+      else if (bulkOperation === 'PRICE') await api('/prices/bulk/apply', { method: 'POST', body: JSON.stringify({ branchId, operation: data.get('priceOperation'), value: String(data.get('priceValue')), products: [...selected].map((productId) => ({ productId })) }) });
+      else await api('/products/bulk/apply', { method: 'POST', body: JSON.stringify(bulkBody(data)) });
+      setImporting(`${selected.size.toLocaleString('es-AR')} productos actualizados y auditados.`); setSelected(new Set()); setBulkOpen(false); setBulkPreview(undefined); await load();
+    } catch (error) { setLoadError((error as Error).message); } finally { setBulkBusy(false); }
+  }
   return (
     <>
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -333,48 +395,18 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
             <PackagePlus size={19} />
             Nuevo producto
           </button>}
-          {isSuperAdmin && <button className="btn-secondary text-red-700" onClick={async () => { const summary = await api<{ count: number }>('/products/bulk-delete-all/summary'); setDeleteAll({ count: summary.count, confirmation: '' }); }}><Trash2 size={18}/>Eliminar todos</button>}
+          {hasPermission(me, 'products.purgeAll') && <button className="btn-secondary text-red-700" onClick={async () => { const summary = await api<{ count: number }>('/products/bulk-delete-all/summary'); setDeleteAll({ count: summary.count, confirmation: '' }); }}><Trash2 size={18}/>Vaciar productos</button>}
         </div>
       </div>
       {selected.size > 0 && (
         <div className="bulk-action-bar">
           <b>{selected.size} seleccionados</b>
-          {hasPermission(me, 'prices.bulkUpdate') && <button
-            onClick={async () => {
-              const pct = Number(prompt('Porcentaje de aumento (use negativo para disminuir)', '6'));
-              if (!Number.isFinite(pct) || !branchId) return;
-              await api('/prices/bulk/apply', {
-                method: 'POST',
-                body: JSON.stringify({
-                  branchId,
-                  operation: 'PERCENT',
-                  value: String(pct),
-                  products: [...selected].map((productId) => ({ productId })),
-                }),
-              });
-              setSelected(new Set());
-              await load();
-            }}
-          >
-            Aumentar precios
-          </button>}
+          {hasPermission(me, 'products.bulkUpdate') && <button onClick={() => void openBulkEditor()}><SlidersHorizontal size={17}/>Edición masiva</button>}
           <button onClick={() => (window.location.href = appPath('/labels'))}>Generar etiquetas</button>
-          {hasPermission(me, 'products.disable') && <button
-            className="text-red-700"
-            onClick={async () => {
-              if (!confirm(`Se eliminarán ${selected.size} productos. ¿Continuar?`)) return;
-              await api('/products/bulk-disable', {
-                method: 'POST',
-                body: JSON.stringify({ productIds: [...selected] }),
-              });
-              setSelected(new Set());
-              await load();
-            }}
-          >
-            Desactivar
-          </button>}
+          <button onClick={() => setSelected(new Set())}>Limpiar selección</button>
         </div>
       )}
+      {hasPermission(me, 'products.bulkUpdate') && <div className="mt-3 flex justify-end"><button className="btn-secondary" disabled={bulkBusy} onClick={() => void selectFiltered()}>{bulkBusy ? 'Seleccionando…' : 'Seleccionar todos los filtrados (máx. 5.000)'}</button></div>}
       {importing && <p className="mt-4 rounded-xl bg-brand-50 p-4 text-sm text-brand-800">{importing}</p>}
       {loadError && <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">{loadError}</p>}
       {refreshing && <p className="mt-3 text-sm text-slate-500">Cargando desde el servidor…</p>}
@@ -431,8 +463,15 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                 <input
                   type="checkbox"
                   aria-label="Seleccionar página"
-                  checked={Boolean(result?.data.length) && selected.size === result?.data.length}
-                  onChange={(e) => setSelected(e.target.checked ? new Set(result?.data.map((p) => p.id)) : new Set())}
+                  checked={Boolean(result?.data.length) && result!.data.every((product) => selected.has(product.id))}
+                  onChange={(event) => setSelected((current) => {
+                    const next = new Set(current);
+                    for (const product of result?.data ?? []) {
+                      if (event.target.checked) next.add(product.id);
+                      else next.delete(product.id);
+                    }
+                    return next;
+                  })}
                 />
               </th>
               {(mode === 'master'
@@ -540,7 +579,17 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
           </div>
         </footer>
       </div>
-      {deleteAll && <div className="modal-backdrop"><section className="modal-card border-2 border-red-600"><div className="flex justify-between"><div><p className="font-bold text-red-700">ZONA DE PELIGRO · SUPER_ADMIN</p><h2 className="text-2xl font-bold">Eliminar todos los productos</h2></div><button onClick={() => setDeleteAll(undefined)}><X/></button></div><p>Se desactivarán mediante soft delete <b>{deleteAll.count.toLocaleString('es-AR')} productos</b>. Las ventas, compras, movimientos e historiales permanecerán guardados.</p><label>Escribí <b>ELIMINAR</b> para confirmar<input autoFocus value={deleteAll.confirmation} onChange={(e) => setDeleteAll({ ...deleteAll, confirmation: e.target.value })}/></label><button className="min-h-14 bg-red-700 text-white" disabled={deleteAll.confirmation !== 'ELIMINAR'} onClick={async () => { const result = await api<{ count: number }>('/products/bulk-delete-all', { method: 'POST', body: JSON.stringify({ confirmation: deleteAll.confirmation }) }); setDeleteAll(undefined); setImporting(`${result.count} productos fueron desactivados.`); await load(); }}>Eliminar catálogo completo</button></section></div>}
+      {bulkOpen && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Edición masiva de productos"><section className="modal-card max-w-4xl"><header className="flex items-start justify-between gap-4"><div><p className="eyebrow">CAMBIO CONTROLADO</p><h2 className="text-2xl font-bold">Editar {selected.size.toLocaleString('es-AR')} productos</h2><p className="text-sm text-slate-500">La selección se conserva al cambiar de página. Primero revisá la vista previa y luego confirmá.</p></div><button type="button" aria-label="Cerrar" onClick={() => { setBulkOpen(false); setBulkPreview(undefined); }}><X/></button></header><form id="bulk-product-form" className="mt-5 grid gap-4" onSubmit={previewBulk}><label>Operación<select value={bulkOperation} onChange={(event) => { setBulkOperation(event.target.value as BulkOperation); setBulkPreview(undefined); }}><option value="CATEGORY">Cambiar categoría / subcategoría</option><option value="FAMILY">Cambiar familia</option><option value="SUPPLIER">Agregar proveedor</option><option value="MINIMUM">Cambiar stock mínimo</option><option value="STATE">Cambiar estado</option>{hasPermission(me, 'prices.bulkUpdate') && <option value="PRICE">Cambiar precios</option>}{hasPermission(me, 'products.disable') && <option value="DELETE">Eliminar selección</option>}</select></label>
+        {bulkOperation === 'CATEGORY' && <div className="grid gap-3 md:grid-cols-2"><label>Categoría<select name="categoryId" required value={bulkCategoryId} onChange={(event) => setBulkCategoryId(event.target.value)}><option value="">Seleccionar…</option>{categories.filter((item) => !item.parentId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Subcategoría<select name="subcategoryId"><option value="">Sin subcategoría</option>{categories.filter((item) => item.parentId === bulkCategoryId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div>}
+        {bulkOperation === 'FAMILY' && <label>Familia<select name="familyId"><option value="">Quitar familia</option>{families.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+        {bulkOperation === 'SUPPLIER' && <label>Proveedor<select name="supplierId" required><option value="">Seleccionar…</option>{suppliers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>Se vincula sin reemplazar los proveedores existentes.</small></label>}
+        {bulkOperation === 'MINIMUM' && <label>Nuevo stock mínimo<input name="stockMinimum" type="number" min="0" step="0.001" required disabled={!branchId}/><small>Se aplica únicamente a la sucursal seleccionada.</small></label>}
+        {bulkOperation === 'STATE' && <div className="grid gap-3 md:grid-cols-2"><label>Estado maestro<select name="active"><option value="true">Activo</option><option value="false">Inactivo</option></select></label><label>Estado en sucursal<select name="enabled" disabled={!branchId}><option value="true">Habilitado</option><option value="false">Deshabilitado</option></select></label></div>}
+        {bulkOperation === 'PRICE' && <div className="grid gap-3 md:grid-cols-2"><label>Operación<select name="priceOperation"><option value="PERCENT">Porcentaje</option><option value="AMOUNT">Importe fijo a sumar</option><option value="MARGIN">Margen sobre costo</option></select></label><label>Valor<input name="priceValue" type="number" step="0.01" required/></label></div>}
+        {bulkOperation === 'DELETE' && <p className="rounded-xl bg-red-50 p-4 text-red-800">Los productos seleccionados se desactivarán mediante baja lógica. No se eliminarán ventas, compras ni movimientos históricos.</p>}
+        <button className="btn-secondary" disabled={bulkBusy}>{bulkBusy ? 'Preparando…' : 'Generar vista previa'}</button>
+      </form>{bulkPreview && <section className="mt-5 rounded-2xl border p-4"><div className="flex items-center justify-between gap-3"><div><h3 className="font-bold">Vista previa confirmada</h3><p className="text-sm text-slate-500">Afectará {bulkPreview.count.toLocaleString('es-AR')} productos. Se muestran hasta 50.</p></div><button type="button" className={bulkOperation === 'DELETE' ? 'min-h-11 rounded-xl bg-red-700 px-4 font-bold text-white' : 'btn'} disabled={bulkBusy} onClick={() => void applyBulk()}>{bulkBusy ? 'Aplicando…' : bulkOperation === 'DELETE' ? 'Confirmar eliminación' : 'Aplicar cambios'}</button></div><div className="mt-4 max-h-64 divide-y overflow-y-auto">{bulkPreview.sample.map((row) => <div className="flex justify-between gap-3 py-2 text-sm" key={row.id ?? row.productId}><span><b>{row.internalCode ?? row.code}</b> · {row.name}</span>{row.oldPrice !== undefined && <span>${Number(row.oldPrice).toLocaleString('es-AR')} → <b>${Number(row.newPrice).toLocaleString('es-AR')}</b></span>}</div>)}</div></section>}</section></div>}
+      {deleteAll && <div className="modal-backdrop"><section className="modal-card border-2 border-red-600"><div className="flex justify-between"><div><p className="font-bold text-red-700">ZONA DE PELIGRO · ENTORNO DE PRUEBA</p><h2 className="text-2xl font-bold">Vaciar todos los productos</h2></div><button onClick={() => setDeleteAll(undefined)}><X/></button></div><p>Se desactivarán mediante soft delete <b>{deleteAll.count.toLocaleString('es-AR')} productos</b>. Las ventas, compras, movimientos e historiales permanecerán guardados. Esta acción requiere el permiso específico para vaciar catálogo.</p><label>Escribí <b>VACIAR PRODUCTOS</b> para confirmar<input autoFocus value={deleteAll.confirmation} onChange={(e) => setDeleteAll({ ...deleteAll, confirmation: e.target.value })}/></label><button className="min-h-14 bg-red-700 text-white" disabled={deleteAll.confirmation !== 'VACIAR PRODUCTOS'} onClick={async () => { const result = await api<{ count: number }>('/products/bulk-delete-all', { method: 'POST', body: JSON.stringify({ confirmation: deleteAll.confirmation }) }); setDeleteAll(undefined); setImporting(`${result.count} productos fueron desactivados.`); await load(); }}>Vaciar catálogo completo</button></section></div>}
       {show && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/50 p-4">
           <form

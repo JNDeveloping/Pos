@@ -174,6 +174,17 @@ class ImportBatchDto {
   @IsOptional() @IsUUID() branchId?: string;
   @IsOptional() @IsBoolean() enableForBranch?: boolean;
 }
+class ProductBulkDto {
+  @IsArray() @ArrayMaxSize(5000) @ArrayUnique() @IsUUID('4', { each: true }) productIds!: string[];
+  @IsOptional() @IsUUID() branchId?: string;
+  @IsOptional() @IsUUID() categoryId?: string;
+  @IsOptional() @IsUUID() subcategoryId?: string | null;
+  @IsOptional() @IsUUID() familyId?: string | null;
+  @IsOptional() @IsUUID() supplierId?: string;
+  @IsOptional() @IsNumberString() stockMinimum?: string;
+  @IsOptional() @IsBoolean() active?: boolean;
+  @IsOptional() @IsBoolean() enabled?: boolean;
+}
 @ApiTags('Productos')
 @Controller('products')
 export class ProductsController {
@@ -290,7 +301,7 @@ export class ProductsController {
     @CurrentSession() s: Session,
     @Body('productIds') productIds: string[],
   ) {
-    if (!Array.isArray(productIds) || !productIds.length || productIds.length > 1000)
+    if (!Array.isArray(productIds) || !productIds.length || productIds.length > 5000)
       throw new BadRequestException('Selección inválida');
     const now = new Date();
     const result = await this.db.product.updateMany({
@@ -309,18 +320,115 @@ export class ProductsController {
     });
     return result;
   }
-  @Get('bulk-delete-all/summary') @RequirePermissions('products.disable') async deleteAllSummary(
+  @Post('bulk/preview') @RequirePermissions('products.bulkUpdate') async bulkPreview(
+    @CurrentSession() s: Session,
+    @Body() d: ProductBulkDto,
+  ) {
+    const rows = await this.validateBulk(s, d);
+    return {
+      count: rows.length,
+      sample: rows.slice(0, 50),
+      changes: {
+        categoryId: d.categoryId,
+        subcategoryId: d.subcategoryId,
+        familyId: d.familyId,
+        supplierId: d.supplierId,
+        stockMinimum: d.stockMinimum,
+        active: d.active,
+        enabled: d.enabled,
+      },
+    };
+  }
+  @Get('bulk-selection') @RequirePermissions('products.bulkUpdate') async bulkSelection(
+    @CurrentSession() s: Session,
+    @Query() q: ListQuery,
+  ) {
+    if (s.branchId && q.branchId && s.branchId !== q.branchId)
+      throw new ForbiddenException('Sucursal fuera de su alcance');
+    const branchId = s.branchId ?? q.branchId;
+    const search = q.search?.trim();
+    const where: Prisma.ProductWhereInput = {
+      companyId: s.companyId,
+      deletedAt: null,
+      ...(q.active !== undefined ? { active: q.active } : {}),
+      ...(q.categoryId ? { categoryId: q.categoryId } : {}),
+      ...(q.familyId ? { familyId: q.familyId } : {}),
+      ...(branchId ? {
+        branchConfigs: q.enabled === false
+          ? { none: { branchId, enabled: true } }
+          : { some: { branchId, ...(q.enabled === true ? { enabled: true } : {}) } },
+      } : {}),
+      ...(search ? { OR: [
+        { name: { contains: search, mode: 'insensitive' } },
+        { internalCode: { contains: search, mode: 'insensitive' } },
+        { sku: { contains: search, mode: 'insensitive' } },
+        { barcodes: { some: { barcode: { contains: search } } } },
+        { supplierProducts: { some: { OR: [
+          { supplierCode: { contains: search, mode: 'insensitive' } },
+          { supplierBarcode: { contains: search } },
+        ] } } },
+      ] } : {}),
+    };
+    const [rows, total] = await this.db.$transaction([
+      this.db.product.findMany({ where, select: { id: true }, orderBy: { name: 'asc' }, take: 5000 }),
+      this.db.product.count({ where }),
+    ]);
+    return { productIds: rows.map(({ id }) => id), total, limited: total > rows.length };
+  }
+  @Post('bulk/apply') @RequirePermissions('products.bulkUpdate') async bulkApply(
+    @CurrentSession() s: Session,
+    @Body() d: ProductBulkDto,
+  ) {
+    const rows = await this.validateBulk(s, d);
+    const productData: Prisma.ProductUncheckedUpdateManyInput = {};
+    if (d.categoryId !== undefined) productData.categoryId = d.categoryId;
+    if (d.subcategoryId !== undefined) productData.subcategoryId = d.subcategoryId;
+    if (d.familyId !== undefined) productData.familyId = d.familyId;
+    if (d.active !== undefined) productData.active = d.active;
+    const hasProductChanges = Object.keys(productData).length > 0;
+    const hasBranchChanges = d.stockMinimum !== undefined || d.enabled !== undefined;
+    if (!hasProductChanges && !hasBranchChanges && !d.supplierId)
+      throw new BadRequestException('Seleccione al menos un cambio masivo');
+    return this.db.$transaction(async (tx) => {
+      if (hasProductChanges)
+        await tx.product.updateMany({ where: { companyId: s.companyId, id: { in: d.productIds }, deletedAt: null }, data: productData });
+      if (hasBranchChanges)
+        await tx.branchProduct.updateMany({
+          where: { productId: { in: d.productIds }, branchId: d.branchId },
+          data: { ...(d.stockMinimum !== undefined ? { stockMinimum: new Prisma.Decimal(d.stockMinimum) } : {}), ...(d.enabled !== undefined ? { enabled: d.enabled } : {}) },
+        });
+      if (d.supplierId) {
+        await tx.supplierProduct.createMany({
+          data: d.productIds.map((productId) => ({ supplierId: d.supplierId!, productId })),
+          skipDuplicates: true,
+        });
+        await tx.supplierProduct.updateMany({ where: { supplierId: d.supplierId, productId: { in: d.productIds } }, data: { active: true } });
+      }
+      const batchId = randomUUID();
+      await tx.auditLog.create({
+        data: {
+          companyId: s.companyId,
+          branchId: d.branchId,
+          userId: s.sub,
+          entityType: 'PRODUCT_BULK',
+          entityId: batchId,
+          action: 'PRODUCTS_BULK_UPDATED',
+          metadata: { batchId, count: rows.length, productIds: d.productIds, changes: this.json(d) },
+        },
+      });
+      return { updated: rows.length, batchId };
+    }, { timeout: 60000 });
+  }
+  @Get('bulk-delete-all/summary') @RequirePermissions('products.purgeAll') async deleteAllSummary(
     @CurrentSession() s: Session,
   ) {
-    if (!s.roles.includes('SUPER_ADMIN')) throw new ForbiddenException('Sólo SUPER_ADMIN puede eliminar todo el catálogo');
     return { count: await this.db.product.count({ where: { companyId: s.companyId, deletedAt: null } }) };
   }
-  @Post('bulk-delete-all') @RequirePermissions('products.disable') async deleteAll(
+  @Post('bulk-delete-all') @RequirePermissions('products.purgeAll') async deleteAll(
     @CurrentSession() s: Session,
     @Body('confirmation') confirmation: string,
   ) {
-    if (!s.roles.includes('SUPER_ADMIN')) throw new ForbiddenException('Sólo SUPER_ADMIN puede eliminar todo el catálogo');
-    if (confirmation !== 'ELIMINAR') throw new BadRequestException('Confirmación inválida');
+    if (confirmation !== 'VACIAR PRODUCTOS') throw new BadRequestException('Confirmación inválida');
     const now = new Date();
     return this.db.$transaction(async (tx) => {
       const products = await tx.product.updateMany({
@@ -1052,6 +1160,29 @@ export class ProductsController {
       select: { id: true },
     });
     if (conflict) throw new BadRequestException('El código interno ya pertenece a otro producto');
+  }
+  private async validateBulk(s: Session, d: ProductBulkDto) {
+    if (!d.productIds.length) throw new BadRequestException('Seleccione al menos un producto');
+    if (d.branchId) {
+      const branch = await this.db.branch.findFirst({ where: { id: d.branchId, companyId: s.companyId, deletedAt: null } });
+      if (!branch || (s.branchId && s.branchId !== d.branchId)) throw new BadRequestException('Sucursal inválida');
+    }
+    if ((d.stockMinimum !== undefined || d.enabled !== undefined) && !d.branchId)
+      throw new BadRequestException('Debe seleccionar una sucursal para cambios operativos');
+    if (d.categoryId) await this.validateRefs(s, d.categoryId, undefined, d.subcategoryId ?? undefined, d.familyId ?? undefined);
+    else if (d.subcategoryId) throw new BadRequestException('La subcategoría requiere una categoría');
+    else if (d.familyId) await this.validateFamily(s, d.familyId);
+    if (d.supplierId) {
+      const supplier = await this.db.supplier.findFirst({ where: { id: d.supplierId, companyId: s.companyId, active: true, deletedAt: null } });
+      if (!supplier) throw new BadRequestException('Proveedor inválido');
+    }
+    const rows = await this.db.product.findMany({
+      where: { companyId: s.companyId, id: { in: d.productIds }, deletedAt: null },
+      select: { id: true, internalCode: true, name: true, category: { select: { name: true } }, family: { select: { name: true } } },
+      orderBy: { name: 'asc' },
+    });
+    if (rows.length !== d.productIds.length) throw new BadRequestException('La selección contiene productos inexistentes o fuera de la empresa');
+    return rows;
   }
   private async ensureBarcodeAvailable(s: Session, barcode: string, productId?: string) {
     if (!/^\d+$/.test(barcode)) throw new BadRequestException('El código de barras debe ser numérico');

@@ -36,4 +36,12 @@ describe('product pagination', () => {
     }));
     expect(result.meta).toEqual(expect.objectContaining({ total: 50000, pages: 2500 }));
   });
+  it('resuelve como máximo 5.000 ids desde filtros sin cargar fichas completas', async () => {
+    const findMany = jest.fn().mockResolvedValue([{ id: 'one' }, { id: 'two' }]);
+    const db = { product: { findMany, count: jest.fn().mockResolvedValue(6000) }, $transaction: jest.fn((operations: Promise<unknown>[]) => Promise.all(operations)) };
+    const controller = new ProductsController(db as never);
+    const session: Session = { sub: 'u', companyId: 'c', branchId: null, roles: [], permissions: ['products.bulkUpdate'], tokenVersion: 0 };
+    await expect(controller.bulkSelection(session, { page: 1, limit: 20, search: 'pan' })).resolves.toEqual({ productIds: ['one', 'two'], total: 6000, limited: true });
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ select: { id: true }, take: 5000 }));
+  });
 });
