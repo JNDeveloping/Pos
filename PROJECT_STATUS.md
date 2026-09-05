@@ -90,13 +90,14 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 
 ### Parcial, frágil o no certificado
 
-- **Dashboard/reportes:** datos reales y monitor multi-sucursal; los límites hoy/ayer usan zona del proceso y pueden cortar
-  mal en producción UTC en vez de `America/Argentina/Buenos_Aires`.
+- **Dashboard/reportes:** Inicio muestra ventas hoy/ayer, variación, tickets, promedio, cajas/efectivo, pagos, alertas,
+  últimas ventas y resumen por sucursal. Los cortes diarios se calculan en `America/Argentina/Buenos_Aires` aun con servidor UTC.
 - **Categorías/familias:** categorías tienen CRUD jerárquico y el editor limita subcategorías a la categoría elegida.
   `ProductFamily` tiene modelo/API y puede asignarse o quitarse al crear/editar; la gestión masiva de familias sigue pendiente.
 - **Stock escritorio:** no expone reposición local aunque API y móvil sí; operaciones secundarias muestran JSON técnico.
 - **Vencimientos:** consulta y lotes existen, pero falta una UX comercial con riesgo, valor, filtros y edición desde ficha.
-- **Compras frontend:** las altas cargan sólo los primeros 100 productos; sin búsqueda remota no escalan al catálogo real.
+- **Compras frontend:** la carga manual busca productos paginados en backend y confirma luego mediante el flujo transaccional.
+  La pantalla de órdenes de compra histórica todavía conserva un selector inicial limitado y debe migrarse al mismo buscador.
 - **Proveedores:** ficha y relaciones funcionan; cuenta corriente no existe y permanece fuera del alcance aprobado.
 - **Etiquetas:** Fleje, Cartel FyV y A5 Liqui imprimen con composición física; falta calibración por impresora y marcar como
   impresa sigue siendo una acción separada del diálogo del navegador.
@@ -126,8 +127,8 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 2. **Permisos de Configuración POS:** terminales y medios se renderizan desde una ruta autorizada por `branches.settings`,
    pero las APIs exigen además `terminals.view/manage` y `sales.access/paymentMethods.manage`. La UI no filtra todas esas
    acciones; el resultado puede ser 403, promesa rechazada o controles visibles que luego fallan.
-3. **Código de terminal rápido:** se calcula con la cantidad de terminales activas cargadas. Una terminal inactiva con el
-   mismo código provoca violación de unicidad y un mensaje poco orientativo.
+3. **Terminal rápida:** la apertura calcula el primer código `CAJA-N` libre incluyendo terminales inactivas y conserva el
+   índice único de base. Falta una prueba HTTP concurrente creando terminales nuevas al mismo tiempo.
 4. **Sin prueba real de la última migración:** schema y SQL son coherentes y Prisma valida, pero no se aplicó la migración
    sobre una copia PostgreSQL ni se probó rollback/compatibilidad de despliegue.
 
@@ -139,11 +140,11 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 6. **Cobertura de rutas:** la navegación interna y los redirects legados ya usan History API sin recargar el documento ni
    mutar historial durante render. Las rutas desconocidas muestran una salida 404 clara en lugar de caer silenciosamente
    en Dashboard; falta una prueba e2e que recorra todos los enlaces visibles por cada combinación de permisos.
-7. **Inicialización POS acoplada:** un `Promise.all` carga caja, pagos, catálogo y settings. Si falla una sola API, toda la
-   preparación se marca offline y puede ocultar datos que sí estaban disponibles.
+7. **Inicialización POS:** caja y medios de pago siguen siendo requisitos estrictos; favoritos, grupos y apariencia ahora
+   fallan de forma aislada y dejan el POS utilizable con defaults y un aviso informativo.
 8. **Configuración duplicada:** `Settings.tsx` es la autoridad servidor; `PosSettingsPage.tsx` y helpers locales son legado.
-9. **Listados no escalables:** compras/órdenes usan un lote fijo de 100 productos; ventas administrativas toman hasta 100;
-   varias operaciones de stock no tienen UI paginada útil.
+9. **Listados pendientes:** Stock y Productos ya usan paginación; la carga manual de compra usa búsqueda remota. Órdenes de
+   compra y ventas administrativas todavía tienen selectores/límites que deben unificarse antes de volumen alto.
 10. **Calidad de contratos:** abundan `any`, tipos frontend duplicados y módulos Nest de cientos de líneas; compilan, pero
     aumentan el riesgo de que un cambio de DTO rompa la UI sin test HTTP/contrato.
 
@@ -180,7 +181,7 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 ## Verificaciones de esta auditoría
 
 - Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 22 SQL.
-- Se ejecutan como controles locales: lint, typecheck, 24 tests frontend, 60 tests backend, build y `check:release`.
+- Se ejecutan como controles locales: lint, typecheck, 24 tests frontend, 61 tests backend, build y `check:release`.
 - PostgreSQL/Redis HTTP/e2e quedan **no ejecutados** por falta de servicios/credenciales en el entorno de auditoría.
 
 ## Estabilización de arquitectura — 2026-09-05
@@ -296,6 +297,23 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
   `VACIAR PRODUCTOS`. `products.bulkUpdate` gobierna el resto de cambios masivos. Ambos permisos requieren sincronización.
 - No hubo cambio de schema ni migración. Pendiente: medir un lote de 5.000 productos contra PostgreSQL real y ajustar el
   tiempo máximo si la infraestructura productiva no completa las historias económicas dentro de 120 segundos.
+
+## Puesta a punto operativa — 2026-09-05
+
+- Inicio fue reducido a indicadores accionables sin gráficos decorativos: hoy/ayer, diferencia, tickets, promedio, cajas,
+  efectivo esperado, pagos del día, alertas, últimas ventas, sucursales y accesos rápidos respaldados por rutas reales.
+- Productos compacta clasificación y valores comerciales para mantener acciones dentro del ancho disponible. Cambiar precio
+  desde listado o ficha encola etiqueta y conserva historial/auditoría del cambio.
+- Stock ofrece búsqueda con debounce, paginación de 50, sucursal visible, estados, ajuste con motivo e historial reciente.
+  Los consumidores móviles conservan temporalmente la respuesta array compatible del endpoint sin `paged=true`.
+- El arqueo POS muestra desglose de pagos por naturaleza además de fondo, efectivo, movimientos, esperado, contado y diferencia.
+  La inicialización ya no inutiliza la caja si falla sólo apariencia, favoritos o accesos rápidos.
+- Se eliminaron controles decorativos del encabezado: la búsqueda global ahora abre Productos y la campana sin función se ocultó.
+  El menú distingue Operación, Ventas y Configuración, mostrando únicamente rutas con permiso.
+- Proveedores dejó de exponer pestañas futuras simuladas y corrigió enlaces SPA/errores; el alta básica incluye WhatsApp y notas.
+  Compras manuales dejó de cargar 100 productos y usa búsqueda backend de hasta 30 resultados con prevención de doble envío.
+- No hubo migraciones. La versión compila y sus reglas unitarias pasan, pero **no se declara certificada para producción** hasta
+  aplicar las 22 migraciones y completar el recorrido HTTP real con PostgreSQL: producto → stock → caja → venta → pago → cierre.
 
 ## Orden de trabajo recomendado (sin implementarlo ahora)
 

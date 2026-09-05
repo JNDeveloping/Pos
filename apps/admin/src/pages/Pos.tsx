@@ -41,7 +41,7 @@ type QuickGroup = { id: string; name: string; icon?: string; buttonSize?: string
 type Cashier = { id: string; firstName: string; lastName: string; username: string };
 type CashSession = { id: string; terminalId: string; cashierUserId: string; openingAmount: string; terminal: Terminal; cashier: Cashier };
 type CashMovement = { id: string; kind: 'INCOME' | 'EXPENSE' | 'WITHDRAWAL'; amount: string; reason: string; userId: string; origin: string; createdAt: string };
-type CashSummary = { openingAmount: string; cashSales: string; movementImpact: string; expectedCash: string; movements: CashMovement[] };
+type CashSummary = { openingAmount: string; cashSales: string; movementImpact: string; expectedCash: string; paymentBreakdown: { kind: string; name: string; total: string }[]; movements: CashMovement[] };
 type PosAppearance = { background?: string; backgroundOpacity?: number; backgroundOverlay?: string; backgroundBlur?: number; backgroundPosition?: string };
 type Suspended = { id: string; at: string; cashier: string; branchId?: string; cart: CartLine[] };
 type Modal = 'help' | 'search' | 'edit' | 'discount' | 'quickSale' | 'suspended' | 'utilities' | 'payment' | 'cashMovement' | 'closeCash' | null;
@@ -129,16 +129,16 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
 
   useEffect(() => {
     if (!branch) return;
+    let active = true;
     setSetupReady(false);
     setCashSession(undefined);
-    Promise.all([
-      api<Method[]>('/payment-methods'),
-      api<{ terminals: Terminal[]; cashiers: Cashier[] }>(`/cash-sessions/bootstrap?branchId=${branch.id}`),
-      api<PosProduct[]>(`/pos/products/favorites?branchId=${branch.id}`),
-      api<QuickGroup[]>(`/pos/products/quick-groups?branchId=${branch.id}`),
-      api<{ appearance?: PosAppearance; pos?: PosSettings }>(`/pos/products/settings?branchId=${branch.id}`),
-    ])
-      .then(async ([paymentMethods, bootstrap, favoriteProducts, groups, serverSettings]) => {
+    async function prepare() {
+      try {
+        const [paymentMethods, bootstrap] = await Promise.all([
+          api<Method[]>('/payment-methods'),
+          api<{ terminals: Terminal[]; cashiers: Cashier[] }>(`/cash-sessions/bootstrap?branchId=${branch!.id}`),
+        ]);
+        if (!active) return;
         setMethods(paymentMethods.filter((item) => item.active !== false));
         const branchTerminals = bootstrap.terminals.filter((item) => item.active !== false);
         setTerminals(branchTerminals);
@@ -149,22 +149,32 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
         setTerminalId(nextTerminal);
         if (nextTerminal) {
           const current = await api<CashSession | null>(`/cash-sessions/current?terminalId=${nextTerminal}`);
-          if (current) { setCashSession(current); setCashierId(current.cashierUserId); }
+          if (active && current) { setCashSession(current); setCashierId(current.cashierUserId); }
         }
-        setSettings({ ...DEFAULT_POS_SETTINGS, ...serverSettings.pos });
-        setAppearance(serverSettings.appearance ?? {});
-        setFavorites(favoriteProducts);
-        setQuickProducts(favoriteProducts);
-        setQuickGroups(groups);
+        const optional = await Promise.allSettled([
+          api<PosProduct[]>(`/pos/products/favorites?branchId=${branch!.id}`),
+          api<QuickGroup[]>(`/pos/products/quick-groups?branchId=${branch!.id}`),
+          api<{ appearance?: PosAppearance; pos?: PosSettings }>(`/pos/products/settings?branchId=${branch!.id}`),
+        ]);
+        if (!active) return;
+        const favoriteProducts = optional[0].status === 'fulfilled' ? optional[0].value : [];
+        setFavorites(favoriteProducts); setQuickProducts(favoriteProducts);
+        setQuickGroups(optional[1].status === 'fulfilled' ? optional[1].value : []);
+        const serverSettings = optional[2].status === 'fulfilled' ? optional[2].value : {};
+        setSettings({ ...DEFAULT_POS_SETTINGS, ...serverSettings.pos }); setAppearance(serverSettings.appearance ?? {});
         setActiveQuickGroup('favorites');
         setOnline(true);
         setSetupReady(true);
-      })
-      .catch((error: Error) => {
+        if (optional.some((result) => result.status === 'rejected')) setMessage({ kind: 'info', text: 'El POS está listo. Algunas preferencias visuales no pudieron cargarse.' });
+      } catch (error) {
+        if (!active) return;
         setOnline(false);
-        setMessage({ kind: 'error', text: error.message });
+        setMessage({ kind: 'error', text: (error as Error).message });
         setSetupReady(true);
-      });
+      }
+    }
+    void prepare();
+    return () => { active = false; };
   }, [branch?.id]);
   useEffect(() => {
     sessionStorage.setItem('pos-cart', JSON.stringify(cart));
@@ -865,7 +875,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
         />
       )}
       {modal === 'cashMovement' && cashSession && <CashMovementModal summary={cashSummary} canCreate={hasPermission(me, 'cashSessions.movements.create')} close={() => { setModal(null); focusScanner(); }} save={async (kind, amount, reason) => { await api(`/cash-sessions/${cashSession.id}/movements`, { method: 'POST', body: JSON.stringify({ kind, amount, reason }) }); await loadCashSummary(); }} />}
-      {modal === 'closeCash' && cashSession && <ModalFrame title="Arqueo y cierre de caja" close={() => setModal(null)}><div className="pos-form"><div className="cash-close-summary"><span>Fondo inicial<b>{money(Number(cashSummary?.openingAmount ?? cashSession.openingAmount))}</b></span><span>Ventas en efectivo<b>{money(Number(cashSummary?.cashSales ?? 0))}</b></span><span>Movimientos manuales<b>{money(Number(cashSummary?.movementImpact ?? 0))}</b></span><span>Efectivo esperado<b>{money(Number(cashSummary?.expectedCash ?? cashSession.openingAmount))}</b></span></div><label>Efectivo contado al cierre<input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={closingAmount} onChange={(event) => setClosingAmount(event.target.value)}/></label><div className="payment-change"><span>DIFERENCIA</span><b>{money(Number(closingAmount || 0) - Number(cashSummary?.expectedCash ?? cashSession.openingAmount))}</b></div><label>Observación opcional<textarea value={closingNote} onChange={(event) => setClosingNote(event.target.value)} placeholder="Diferencias y observaciones…"/></label><p className="pos-feedback info">El arqueo, horario y responsable quedarán registrados en Auditoría.</p><button className="pos-close-confirm" disabled={busy || !cashSummary || cart.length > 0 || Number(closingAmount) < 0} onClick={() => void closeCash()}>{busy ? 'Cerrando…' : 'Confirmar cierre de caja'}</button></div></ModalFrame>}
+      {modal === 'closeCash' && cashSession && <ModalFrame title="Arqueo y cierre de caja" close={() => setModal(null)}><div className="pos-form"><div className="cash-close-summary"><span>Fondo inicial<b>{money(Number(cashSummary?.openingAmount ?? cashSession.openingAmount))}</b></span><span>Ventas en efectivo<b>{money(Number(cashSummary?.cashSales ?? 0))}</b></span><span>Movimientos manuales<b>{money(Number(cashSummary?.movementImpact ?? 0))}</b></span><span>Efectivo esperado<b>{money(Number(cashSummary?.expectedCash ?? cashSession.openingAmount))}</b></span></div>{cashSummary?.paymentBreakdown?.length ? <div className="grid grid-cols-2 gap-2">{cashSummary.paymentBreakdown.map((payment) => <div className="rounded-xl bg-slate-100 p-3" key={payment.kind}><small>{payment.name}</small><b className="block">{money(Number(payment.total))}</b></div>)}</div> : null}<label>Efectivo contado al cierre<input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={closingAmount} onChange={(event) => setClosingAmount(event.target.value)}/></label><div className="payment-change"><span>DIFERENCIA</span><b>{money(Number(closingAmount || 0) - Number(cashSummary?.expectedCash ?? cashSession.openingAmount))}</b></div><label>Observación opcional<textarea value={closingNote} onChange={(event) => setClosingNote(event.target.value)} placeholder="Diferencias y observaciones…"/></label><p className="pos-feedback info">El arqueo, horario y responsable quedarán registrados en Auditoría.</p><button className="pos-close-confirm" disabled={busy || !cashSummary || cart.length > 0 || Number(closingAmount) < 0} onClick={() => void closeCash()}>{busy ? 'Cerrando…' : 'Confirmar cierre de caja'}</button></div></ModalFrame>}
     </div>
   );
 }

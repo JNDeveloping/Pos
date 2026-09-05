@@ -1,8 +1,7 @@
-import { useState } from 'react';
+import { FormEvent, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
-  Bell,
   Boxes,
   Building2,
   ChevronRight,
@@ -14,6 +13,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Printer,
+  ReceiptText,
   Search,
   Settings,
   ShoppingCart,
@@ -43,14 +43,21 @@ const groups: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = [
       ['/admin/purchases', 'Compras', ShoppingCart, 'purchases.view'],
       ['/admin/suppliers', 'Proveedores', Truck, 'suppliers.view'],
       ['/labels', 'Etiquetas', Printer, 'labels.view'],
-      ['/', 'Abrir POS', Store, 'sales.access'],
-      ['/admin/cash-live', 'Cajas en vivo', Activity, 'sales.liveView'],
     ],
   },
   {
-    label: 'ADMINISTRACIÓN',
+    label: 'VENTAS',
+    items: [
+      ['/', 'Abrir POS', Store, 'sales.access'],
+      ['/admin/cash-live', 'Cajas en vivo', Activity, 'sales.liveView'],
+      ['/admin/sales', 'Ventas', ReceiptText, 'sales.view'],
+    ],
+  },
+  {
+    label: 'CONFIGURACIÓN',
     items: [
       ['/branches', 'Sucursales', Building2, 'branches.view'],
+      ['/admin/terminals', 'Terminales', Store, 'terminals.view'],
       ['/users', 'Usuarios', Users, 'users.view'],
       ['/audit', 'Auditoría', FileText, 'audit.view'],
       ['/settings', 'Configuración', Settings, 'branches.settings'],
@@ -72,7 +79,13 @@ export function Layout({
 }) {
   const [collapsed, setCollapsed] = useState(false),
     [drawer, setDrawer] = useState(false),
-    [profile, setProfile] = useState(false);
+    [profile, setProfile] = useState(false),
+    [globalSearch, setGlobalSearch] = useState('');
+  function submitSearch(event: FormEvent) {
+    event.preventDefault();
+    const value = globalSearch.trim();
+    if (value) navigate(`/products?search=${encodeURIComponent(value)}`);
+  }
   const route = currentRoute();
   const sidebar = (
     <>
@@ -159,17 +172,13 @@ export function Layout({
               {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
             </button>
           </div>
-          <label className="global-search">
+          <form className="global-search" onSubmit={submitSearch}>
             <Search size={18} />
-            <input placeholder="Buscar productos, proveedores, facturas…" aria-label="Búsqueda global" />
-          </label>
+            <input value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} placeholder="Buscar productos…" aria-label="Búsqueda global" />
+          </form>
           <div className="ml-auto flex items-center gap-2">
             <ConnectionStatus />
             <FullscreenButton />
-            <button className="icon-button hidden sm:grid" aria-label="Notificaciones">
-              <Bell size={19} />
-              <span className="notification-dot" />
-            </button>
             <div className="relative">
               <button className="profile-button" onClick={() => setProfile(!profile)}>
                 <span className="avatar">

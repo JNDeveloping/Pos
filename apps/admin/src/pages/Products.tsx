@@ -35,7 +35,11 @@ type BulkPreview = { count: number; sample: { id?: string; productId?: string; i
 type BulkOperation = 'CATEGORY' | 'FAMILY' | 'SUPPLIER' | 'MINIMUM' | 'STATE' | 'PRICE' | 'DELETE';
 const filtersKey = 'rincon.products.filters';
 function savedFilters() {
-  try { return JSON.parse(sessionStorage.getItem(filtersKey) ?? '{}') as { search?: string; categoryId?: string; familyId?: string; enabled?: 'all' | 'true' | 'false' }; }
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(filtersKey) ?? '{}') as { search?: string; categoryId?: string; familyId?: string; enabled?: 'all' | 'true' | 'false' };
+    const requestedSearch = new URLSearchParams(window.location.search).get('search');
+    return { ...saved, ...(requestedSearch ? { search: requestedSearch } : {}) };
+  }
   catch { return {}; }
 }
 export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
@@ -455,8 +459,8 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
         )}
       </form>
       {scannerOpen && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Escanear código de barras"><section className="modal-card max-w-xl"><header className="flex items-start justify-between gap-4"><div><h2 className="text-xl font-bold">Escanear código de barras</h2><p className="text-sm text-slate-500">Apuntá la cámara al código del producto.</p></div><button type="button" aria-label="Cerrar scanner" onClick={() => { stopScanner(); setScannerOpen(false); }}><X/></button></header><div className="scanner-frame mt-5"><video ref={scannerVideo} muted playsInline/>{!cameraActive && <Camera size={64}/>}<i/></div><p className="mt-4 text-center text-sm text-slate-500">La cámara trasera se elige automáticamente cuando está disponible.</p></section></div>}
-      <div className="card mt-5 overflow-x-auto">
-        <table className="w-full whitespace-nowrap text-left text-sm">
+      <div className="card mt-5 overflow-hidden">
+        <table className="w-full table-fixed text-left text-sm">
           <thead className="border-b bg-slate-50 text-xs uppercase text-slate-500">
             <tr>
               <th className="p-4">
@@ -474,14 +478,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                   })}
                 />
               </th>
-              {(mode === 'master'
-                ? ['Código', 'Producto', 'Categoría', 'Familia', 'Sucursales', 'Estado', 'Acciones']
-                : ['Código', 'Producto', 'Categoría', 'Familia', 'Precio', 'Costo', 'Margen', 'Estado', 'Acciones']
-              ).map((x) => (
-                <th className="p-4" key={x}>
-                  {x}
-                </th>
-              ))}
+              <th className="w-[14%] p-4">Código</th><th className="w-[29%] p-4">Producto / clasificación</th><th className="w-[24%] p-4">{mode === 'master' ? 'Sucursales' : 'Precio / costo / margen'}</th><th className="w-[12%] p-4">Estado</th><th className="w-[21%] p-4">Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -503,36 +500,27 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                       }
                     />
                   </td>
-                  <td className="p-4 font-mono">{p.internalCode}</td>
-                  <td className="p-4 font-semibold">
-                    {p.name}
-                    <small className="block text-slate-400">{p.barcodes[0]?.barcode}</small>
-                  </td>
-                  <td className="p-4">{p.category.name}</td>
-                  <td className="p-4">{p.family?.name ?? '—'}</td>
+                  <td className="break-words p-4 font-mono text-xs">{p.internalCode}<small className="mt-1 block break-all text-slate-400">{p.barcodes[0]?.barcode}</small></td>
+                  <td className="p-4"><b className="block break-words">{p.name}</b><small className="mt-1 block text-slate-500">{p.category.name} · {p.family?.name ?? 'Sin familia'}</small></td>
                   {mode === 'master' ? (
-                    <td className="p-4">
+                    <td className="p-4 font-semibold">
                       {p._count?.branchConfigs ?? p.branchConfigs.filter((x) => x.enabled).length}
                     </td>
                   ) : (
-                    <>
-                      <td className="p-4 font-semibold">$ {Number(c?.salePrice ?? 0).toLocaleString('es-AR')}</td>
-                      <td className="p-4">$ {Number(c?.cost ?? 0).toLocaleString('es-AR')}</td>
-                      <td className="p-4">{c?.margin ?? 0}%</td>
-                    </>
+                    <td className="p-4"><b className="block">Venta $ {Number(c?.salePrice ?? 0).toLocaleString('es-AR')}</b><small className="block text-slate-500">Costo $ {Number(c?.cost ?? 0).toLocaleString('es-AR')} · Margen {c?.margin ?? 0}%</small></td>
                   )}
                   <td className="p-4">
                     <span className="badge">{p.active ? 'Activo' : 'Inactivo'}</span>
                   </td>
                   <td className="p-4">
-                    <div className="flex gap-2">
+                    <div className="flex flex-col items-start gap-1 text-left text-xs sm:text-sm">
                       <a className="font-semibold text-brand-700" href={appPath(`${currentRoute().startsWith('/cashier') ? '/cashier' : ''}/products/${p.id}`)}>
                         Abrir producto
                       </a>
                       {c && hasPermission(me, 'prices.update') && <button className="text-brand-700" onClick={async () => {
                         const next = prompt(`Nuevo precio para ${p.name}`, String(c.salePrice));
                         if (next === null || !branchId || !Number.isFinite(Number(next)) || Number(next) < 0) return;
-                        await api(`/products/${p.id}/branches/${branchId}`, { method: 'PATCH', body: JSON.stringify({ salePrice: next }) });
+                        await api(`/products/${p.id}/branches/${branchId}`, { method: 'PATCH', body: JSON.stringify({ salePrice: next, queueLabel: true }) });
                         await load();
                       }}>Cambiar precio</button>}
                       {hasPermission(me, 'products.update') && branchId &&
@@ -552,7 +540,7 @@ export function Products({ mode = 'branch' }: { mode?: 'branch' | 'master' }) {
                       {p.active && hasPermission(me, 'products.disable') && (
                         <button
                           className="text-red-600"
-                          onClick={() => api(`/products/${p.id}`, { method: 'DELETE' }).then(() => load())}
+                          onClick={() => confirm(`¿Desactivar ${p.name}?`) && api(`/products/${p.id}`, { method: 'DELETE' }).then(() => load())}
                         >
                           Desactivar
                         </button>

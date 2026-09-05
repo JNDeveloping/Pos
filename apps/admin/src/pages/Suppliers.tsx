@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Search, Truck } from 'lucide-react';
 import { api } from '../lib/api';
+import { appPath } from '../lib/navigation';
 type Supplier = {
   id: string;
   code: string;
@@ -22,7 +23,7 @@ export function Suppliers() {
       () =>
         api<{ data: Supplier[] }>(`/suppliers?search=${encodeURIComponent(search)}`)
           .then((x) => setData(x.data))
-          .catch((e) => setError(String(e))),
+          .catch((e: Error) => setError(e.message)),
       250,
     );
     return () => clearTimeout(timer);
@@ -54,7 +55,7 @@ export function Suppliers() {
         {data.map((x) => (
           <a
             className="card grid gap-2 p-4 hover:border-brand-400 md:grid-cols-[120px_1fr_180px_180px]"
-            href={`suppliers/${x.id}`}
+            href={appPath(`/admin/suppliers/${x.id}`)}
             key={x.id}
           >
             <b>{x.code}</b>
@@ -86,7 +87,7 @@ export function Suppliers() {
   );
 }
 function SupplierModal({ close, saved }: { close: () => void; saved: () => void }) {
-  const [form, setForm] = useState({ name: '', legalName: '', cuit: '', phone: '', email: '' }),
+  const [form, setForm] = useState({ name: '', legalName: '', cuit: '', phone: '', whatsapp: '', email: '', notes: '' }),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   async function submit(e: React.FormEvent) {
@@ -99,7 +100,7 @@ function SupplierModal({ close, saved }: { close: () => void; saved: () => void 
       });
       saved();
     } catch (x) {
-      setError(String(x));
+      setError((x as Error).message);
       setBusy(false);
     }
   }
@@ -111,7 +112,7 @@ function SupplierModal({ close, saved }: { close: () => void; saved: () => void 
         <div className="grid gap-4 sm:grid-cols-2">
           {Object.entries(form).map(([k, v]) => (
             <label key={k} className="text-sm">
-              {{ name: 'Nombre *', legalName: 'Razón social', cuit: 'CUIT', phone: 'Teléfono', email: 'Email' }[k]}
+              {{ name: 'Nombre *', legalName: 'Razón social', cuit: 'CUIT', phone: 'Teléfono', whatsapp: 'WhatsApp', email: 'Email', notes: 'Observaciones' }[k]}
               <input required={k === 'name'} value={v} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
             </label>
           ))}

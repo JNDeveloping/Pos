@@ -958,10 +958,10 @@ export class CashSessionsController {
     return session;
   }
   private async summaryData(client: PrismaService | Prisma.TransactionClient, session: { id: string; openingAmount: Prisma.Decimal }) {
-    const [cashPayments, movements] = await Promise.all([
-      client.payment.aggregate({
+    const [payments, movements] = await Promise.all([
+      client.payment.findMany({
         where: { sale: { cashSessionId: session.id, status: SaleStatus.COMPLETED } },
-        _sum: { cashImpact: true },
+        select: { amount: true, cashImpact: true, paymentMethod: { select: { kind: true, name: true } } },
       }),
       client.cashMovement.findMany({ where: { cashSessionId: session.id }, orderBy: { createdAt: 'desc' } }),
     ]);
@@ -969,8 +969,14 @@ export class CashSessionsController {
       (sum, movement) => sum.plus(movement.kind === CashMovementKind.INCOME ? movement.amount : movement.amount.neg()),
       new Prisma.Decimal(0),
     );
-    const cashSales = cashPayments._sum.cashImpact ?? new Prisma.Decimal(0);
-    return { cashSales, movementImpact, movements, expectedCash: new Prisma.Decimal(session.openingAmount).plus(cashSales).plus(movementImpact) };
+    const cashSales = payments.reduce((total, payment) => total.plus(payment.cashImpact), new Prisma.Decimal(0));
+    const paymentBreakdown = Object.values(payments.reduce<Record<string, { kind: string; name: string; total: Prisma.Decimal }>>((groups, payment) => {
+      const key = payment.paymentMethod.kind;
+      groups[key] ??= { kind: key, name: payment.paymentMethod.name, total: new Prisma.Decimal(0) };
+      groups[key].total = groups[key].total.plus(payment.amount);
+      return groups;
+    }, {}));
+    return { cashSales, paymentBreakdown, movementImpact, movements, expectedCash: new Prisma.Decimal(session.openingAmount).plus(cashSales).plus(movementImpact) };
   }
   @Get(':id/summary') @RequirePermissions('cashSessions.movements.view') async summary(
     @CurrentSession() s: Session,
@@ -1025,8 +1031,11 @@ export class CashSessionsController {
     if (!terminal) {
       if (dto.terminalId) throw new BadRequestException('Terminal inválida');
       if (!sessionCan(s, 'terminals.manage')) throw new BadRequestException('No hay terminal configurada. Solicite a un administrador que cree una.');
-      const count = await this.db.terminal.count({ where: { companyId: s.companyId, branchId: dto.branchId } });
-      terminal = await this.db.terminal.create({ data: { companyId: s.companyId, branchId: dto.branchId, code: `CAJA-${count + 1}`, name: dto.terminalName?.trim() || `Caja ${count + 1}` } });
+      const existingCodes = await this.db.terminal.findMany({ where: { companyId: s.companyId, branchId: dto.branchId }, select: { code: true } });
+      const used = new Set(existingCodes.map(({ code }) => code.toUpperCase()));
+      let next = 1;
+      while (used.has(`CAJA-${next}`)) next++;
+      terminal = await this.db.terminal.create({ data: { companyId: s.companyId, branchId: dto.branchId, code: `CAJA-${next}`, name: dto.terminalName?.trim() || `Caja ${next}` } });
     }
     const cashier = await this.db.user.findFirst({
       where: { id: dto.cashierUserId, companyId: s.companyId, active: true, deletedAt: null, OR: [{ branchId: dto.branchId }, { branchAccesses: { some: { branchId: dto.branchId } } }] },
@@ -1066,7 +1075,7 @@ export class CashSessionsController {
         include: { terminal: true, cashier: { select: { id: true, firstName: true, lastName: true, username: true } } },
       });
       await tx.auditLog.create({ data: { companyId: s.companyId, branchId: current.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: current.id, action: 'CASH_SESSION_CLOSED', metadata: { openingAmount: String(current.openingAmount), cashSales: String(summary.cashSales), manualMovements: summary.movementImpact.toString(), expectedCash: expectedCash.toString(), closingAmount: String(dto.closingAmount), difference: new Prisma.Decimal(dto.closingAmount).minus(expectedCash).toString(), terminalId: current.terminalId, cashierUserId: current.cashierUserId } } });
-      return { ...closed, cashSales: summary.cashSales, movementImpact: summary.movementImpact, expectedCash, difference: new Prisma.Decimal(dto.closingAmount).minus(expectedCash) };
+      return { ...closed, cashSales: summary.cashSales, paymentBreakdown: summary.paymentBreakdown, movementImpact: summary.movementImpact, expectedCash, difference: new Prisma.Decimal(dto.closingAmount).minus(expectedCash) };
     });
   }
 }

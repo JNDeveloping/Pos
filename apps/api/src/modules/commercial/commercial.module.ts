@@ -68,6 +68,7 @@ class CommercialService {
       const changed = await tx.branchProduct.update({ where: { id: current.id }, data: { cost: nextCost, salePrice: nextPrice, margin } });
       if (!current.cost.equals(nextCost)) await tx.costHistory.create({ data: { productId, branchId: dto.branchId, oldCost: current.cost, newCost: nextCost, percentageChange: this.percent(current.cost, nextCost), source, changedByUserId: s.sub } });
       if (!current.salePrice.equals(nextPrice)) await tx.priceHistory.create({ data: { productId, branchId: dto.branchId, oldPrice: current.salePrice, newPrice: nextPrice, percentageChange: this.percent(current.salePrice, nextPrice), source: kind === 'COST' ? ChangeSource.COST_RECALCULATION : source, changedByUserId: s.sub } });
+      if (!current.salePrice.equals(nextPrice)) await tx.labelPrintQueue.create({ data: { companyId: s.companyId, branchId: dto.branchId, productId, userId: s.sub, oldPrice: current.salePrice, newPrice: nextPrice } });
       await tx.auditLog.create({ data: { companyId: s.companyId, branchId: dto.branchId, userId: s.sub, entityType: 'BRANCH_PRODUCT', entityId: current.id, action: kind === 'PRICE' ? 'PRICE_CHANGED' : 'COST_CHANGED', before: this.json(current), after: this.json(changed) } });
       return changed;
     });
@@ -91,6 +92,8 @@ class CommercialService {
         if (!row.cost.equals(nextCost)) await tx.costHistory.create({ data: { productId: row.productId, branchId: dto.branchId, oldCost: row.cost, newCost: nextCost, percentageChange: this.percent(row.cost, nextCost), source: ChangeSource.BULK_UPDATE, changedByUserId: s.sub } });
         if (!row.salePrice.equals(nextPrice)) await tx.priceHistory.create({ data: { productId: row.productId, branchId: dto.branchId, oldPrice: row.salePrice, newPrice: nextPrice, percentageChange: this.percent(row.salePrice, nextPrice), source: ChangeSource.BULK_UPDATE, changedByUserId: s.sub } });
       }
+      const labels = changes.filter(({ row, nextPrice }) => !row.salePrice.equals(nextPrice));
+      if (labels.length) await tx.labelPrintQueue.createMany({ data: labels.map(({ row, nextPrice }) => ({ companyId: s.companyId, branchId: dto.branchId, productId: row.productId, userId: s.sub, oldPrice: row.salePrice, newPrice: nextPrice })) });
       await tx.auditLog.create({ data: { companyId: s.companyId, branchId: dto.branchId, userId: s.sub, entityType: 'BRANCH', entityId: dto.branchId, action: kind === 'PRICE' ? 'BULK_PRICE_UPDATE' : 'BULK_COST_UPDATE', metadata: { products: changes.length, operation: dto.operation, value: dto.value } } });
       return { updated: changes.length };
     }, { timeout: 120000 });

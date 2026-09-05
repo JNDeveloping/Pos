@@ -31,7 +31,7 @@ describe('apertura rápida de caja', () => {
     const current = { id: 'session', companyId: 'company', branchId: 'branch', terminalId: 'terminal', cashierUserId: 'cashier', openingAmount: 100, terminal: {}, cashier: {} };
     const tx = {
       cashSession: { update: jest.fn().mockResolvedValue({ ...current, status: 'CLOSED' }) },
-      payment: { aggregate: jest.fn().mockResolvedValue({ _sum: { cashImpact: 25 } }) },
+      payment: { findMany: jest.fn().mockResolvedValue([{ amount: new Prisma.Decimal(25), cashImpact: new Prisma.Decimal(25), paymentMethod: { kind: 'CASH', name: 'Efectivo' } }]) },
       cashMovement: { findMany: jest.fn().mockResolvedValue([{ kind: 'EXPENSE', amount: new Prisma.Decimal(5) }]) },
       auditLog: { create: jest.fn() },
     };
@@ -47,7 +47,8 @@ describe('apertura rápida de caja', () => {
     expect(String(result.difference)).toBe('5');
     expect(tx.cashSession.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'CLOSED', closingAmount: 125, closedByUserId: 'cashier' }) }));
     expect(tx.auditLog.create).toHaveBeenCalled();
-    expect(tx.payment.aggregate).toHaveBeenCalledWith(expect.objectContaining({ _sum: { cashImpact: true } }));
+    expect(tx.payment.findMany).toHaveBeenCalledWith(expect.objectContaining({ select: expect.objectContaining({ cashImpact: true }) }));
+    expect(result.paymentBreakdown).toEqual([expect.objectContaining({ kind: 'CASH', name: 'Efectivo' })]);
   });
   it('registra importe, usuario, hora/origen y auditoría en un movimiento', async () => {
     const current = { id: 'session', companyId: 'company', branchId: 'branch', terminalId: 'terminal', cashierUserId: 'cashier', openingAmount: new Prisma.Decimal(100), terminal: {}, cashier: {} };

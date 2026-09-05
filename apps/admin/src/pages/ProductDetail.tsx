@@ -92,6 +92,7 @@ export function ProductDetail({ id }: { id: string }) {
     event.preventDefault(); if (!branchId) return; const form = new FormData(event.currentTarget);
     await run(() => api(`/products/${id}/branches/${branchId}`, { method: 'PATCH', body: JSON.stringify({
       salePrice: form.get('salePrice'), cost: hasPermission(me, 'costs.update') ? form.get('cost') : undefined,
+      queueLabel: true,
       stockMinimum: form.get('stockMinimum'), enabled: form.get('enabled') === 'on', posFavorite: form.get('posFavorite') === 'on',
       allowManualPrice: form.get('allowManualPrice') === 'on', location: form.get('location') || undefined, shelf: form.get('shelf') || undefined,
     }) }), 'Configuración de venta guardada.');
