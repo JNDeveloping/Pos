@@ -1,131 +1,201 @@
-# Estado real del proyecto — auditoría 2026-09-04
+# Estado técnico real — auditoría general 2026-09-05
 
-## Alcance y verificación
+## Veredicto ejecutivo
 
-Se volvió a contrastar el repositorio completo (SPA, API, Prisma, 18 migraciones, permisos, rutas, scripts y tests),
-tomando el código ejecutable como fuente de verdad. El sistema es un piloto funcional y amplio, pero no está terminado
-de punta a punta ni fue validado en esta revisión contra PostgreSQL/Redis reales. Después de generar Prisma pasan los 67
-tests unitarios actuales (17 frontend y 50 backend), lint, typecheck, build de ambas aplicaciones y el control de
-release. Una instalación limpia necesita ejecutar `prisma:generate`: sin cliente generado los tests backend no compilan.
-El script normal de build de la API también exige que exista `.env`, incluso cuando sólo se quiere compilar.
+El repositorio contiene un POS/ERP existente, amplio y compilable. Producto, stock, compras y venta tienen backend real y
+persistencia Prisma; no son maquetas aisladas. Aun así, **ningún recorrido comercial queda certificado de punta a punta
+en esta auditoría** porque el entorno no dispone de PostgreSQL/Redis ni Docker para aplicar las 18 migraciones y ejecutar
+HTTP/e2e reales. La cobertura actual protege cálculos y políticas puntuales, pero no prueba una venta concurrente completa.
 
-## Arquitectura y seguridad comprobadas
+El flujo más maduro es producto → configuración de sucursal → catálogo POS → carrito → cobro → venta/pagos → movimiento
+de stock → ticket. Los mayores riesgos actuales son: cambios de sucursal no reactivos o con respuestas tardías, permisos
+inconsistentes en Configuración POS, alta rápida de terminal con códigos potencialmente repetidos, fechas de reportes en
+UTC y ausencia de pruebas integradas sobre la base real.
 
-- Monorepo npm workspaces: React 19/Vite 7/PWA bajo `/pos/`; NestJS 11/Prisma 6/PostgreSQL con prefijo `/api`; Redis es
-  auxiliar y tolerante a fallos. La PWA precachea sólo shell/assets y no hay IndexedDB ni caché comercial offline.
-- El esquema conserva UUID, `Decimal`, timestamps, soft delete y separación `companyId`/`branchId`. Hay 18 migraciones
-  ordenadas; las últimas agregan ubicaciones de stock, caja, acceso multi-sucursal y cola de etiquetas.
-- El guard JWT es global, vuelve a consultar usuario/roles/permisos en cada request, respeta revocación por
-  `tokenVersion` y mantiene bypass de `SUPER_ADMIN`. Los controladores sensibles declaran permisos y los servicios
-  revisados filtran tenant; los flujos de sucursal críticos validan pertenencia/acceso.
-- La cobertura automatizada es mayormente unitaria con dobles de Prisma. No hay suite HTTP/e2e ni prueba automatizada
-  de migraciones, concurrencia o transacciones contra PostgreSQL.
+## Arquitectura comprobada
+
+- Monorepo npm workspaces con Node `>=20.19` y TypeScript 5.9.
+- `apps/admin`: React 19, Vite 7, Tailwind 3, Vitest y PWA bajo `/pos/`.
+- `apps/api`: NestJS 11, guard JWT/RBAC global, Prisma 6, PostgreSQL y Redis tolerante a fallos.
+- API pública esperada en `/pos/api`; Nest usa `/api` y escucha internamente en `127.0.0.1:3002`.
+- La PWA sólo precachea shell/assets. No hay IndexedDB, caché de respuestas API ni fuente comercial offline.
+- Existen 18 migraciones inmutables. La última, `20260904170000_pos_terminal_and_line_notes`, agrega impresora/configuración
+  por terminal y nota de línea de venta.
+- `packages/shared` sigue reservado; los contratos frontend/backend continúan duplicados localmente.
+
+## Mapa de datos y relaciones principales
+
+### Identidad, tenant y configuración
+
+- `Company` es el tenant y relaciona sucursales, usuarios, roles, permisos, productos y documentos comerciales.
+- `Branch` contiene reglas comerciales, POS, ticket, descuentos y stock negativo. `UserBranchAccess` amplía el `branchId`
+  principal del usuario y limita las sucursales operables.
+- `CompanySetting` y `BranchSetting` guardan JSON por clave. Apariencia, modo POS y grupos se leen desde servidor;
+  `UserPreference` no existe.
+- `Role` ↔ `Permission` usa `RolePermission`; `User` ↔ `Role` usa `UserRole`. `SUPER_ADMIN` tiene bypass en el guard.
+
+### Catálogo y precios
+
+- `Product` es el maestro por empresa; se relaciona con `Category`, `Brand`, `ProductFamily`, `ProductBarcode` y proveedores.
+- `BranchProduct` habilita el producto por sucursal y guarda costo, precio, margen, mínimo, favorito y reglas POS.
+- `PriceHistory`/`CostHistory` conservan cambios; `PriceList`/`PriceListItem` existen, aunque su administración frontend es
+  mínima y no está enlazada en la navegación principal.
+- `SupplierProduct` aporta código, barcode, descripción, costo y preferencia del proveedor; `SupplierProductAlias` alimenta
+  el matching de facturas y la búsqueda POS.
+
+### Stock, compras y ventas
+
+- `Stock` es el total por producto/sucursal. `StockLocationBalance` divide `SALE_FLOOR` y `WAREHOUSE`; el total debe coincidir
+  con su suma. Toda variación relevante crea `StockMovement`.
+- `StockLot`, `Inventory`, `Waste` y `StockTransfer` existen y conservan trazabilidad, pero sus UIs de escritorio siguen
+  siendo básicas.
+- `PurchaseOrder` y `Purchase` se relacionan con proveedor, sucursal y productos. Confirmar compra puede actualizar costo
+  y recibir stock de forma transaccional/idempotente.
+- `Terminal` pertenece a empresa/sucursal y se relaciona con `CashSession`. Tiene código único por sucursal, nombre,
+  estado, impresora opcional, configuración JSON y secuencia de tickets.
+- `CashSession` une terminal, sucursal y cajero; registra fondo, apertura y cierre. `Sale` conserva terminal, sesión, cajero,
+  totales y estado. `SaleItem` guarda snapshots y nota; `Payment` guarda medio, recibido, vuelto y referencia.
+- `LabelPrintQueue` enlaza producto, sucursal y usuario y mantiene cantidad/estado de etiquetas pendientes.
+
+## Flujo POS actual, sin ambigüedades
+
+1. `App.tsx` restaura JWT, consulta `/auth/me` y obtiene sucursales autorizadas.
+2. `Pos.tsx` carga en paralelo medios de pago, bootstrap de caja, favoritos, grupos y settings de la sucursal.
+3. Sin caja abierta muestra apertura con sucursal, cajero, terminal y fondo. Puede crear terminal sólo con
+   `terminals.manage`; luego abre `CashSession` con `cashSessions.open` y recuerda terminal/cajero en `sessionStorage`.
+4. El buscador resuelve barcode exacto o busca nombre, código interno, SKU, marca y datos/aliases de proveedor. Un segundo
+   scan suma cantidad. Productos pesables abren captura de peso; precio manual depende de permiso y política del producto.
+5. El carrito admite cantidad, precio autorizado, descuento, nota y eliminación. Los suspendidos funcionan, pero viven
+   en `localStorage` de ese navegador y no son compartidos ni históricos comerciales.
+6. Cobro toma medios activos del backend; si la empresa no tiene ninguno, el GET crea Efectivo, Débito, Crédito,
+   Transferencia, Mercado Pago y Otro. Admite pago mixto, referencia, efectivo recibido y vuelto.
+7. El backend revalida tenant, sucursal, terminal, caja, producto, precio, descuentos, stock y pagos. En una transacción
+   serializable crea `Sale`, `SaleItem`, `Payment`, movimientos de stock y auditoría. `operationId` da idempotencia.
+8. La respuesta muestra ticket térmico con imprimir/reimprimir, no imprimir y nueva venta. La impresión automática es un
+   setting de sucursal y abre el diálogo del navegador; no hay impresión nativa silenciosa.
 
 ## Estado por módulo
 
-### Funcional, pero no certificado de punta a punta
+### Funciona a nivel de código y tests unitarios
 
-- **Autenticación, usuarios y RBAC:** login/refresh/logout, sesión persistente de dispositivo, roles, permisos,
-  sucursales autorizadas, protección del último `SUPER_ADMIN`, alta/edición/baja lógica de usuarios y auditoría.
-- **Inicio:** Dashboard consume resumen real (hoy/ayer/mes, margen, stock, vencimientos, medios de pago, series y ventas
-  recientes). `/owner` muestra todas las sucursales accesibles, cajas, ventas y alertas con refresco cada 15 segundos.
-- **Productos:** listado backend paginado, búsqueda por identidad/barcodes/proveedor, importación/exportación, alta,
-  edición, duplicación, baja lógica, cambio de precio, configuración por sucursal, barcodes, proveedor y cronologías.
-  La administración móvil usa búsqueda remota, cámara, alta rápida con foto, precio, ajuste y reposición.
-- **Proveedores y compras:** ficha y baja lógica de proveedor, relación multi-proveedor/aliases, órdenes, compras,
-  confirmación/cancelación, costo opt-in, recepción idempotente y documentos de factura con matching/revisión humana.
-- **Stock y ventas:** stock agregado más saldos `SALE_FLOOR`/`WAREHOUSE`, movimientos transaccionales, ajustes,
-  reposición móvil, lotes, inventarios, mermas y transferencias. POS resuelve catálogo por sucursal, caja abierta,
-  pagos, venta idempotente, ticket, anulación y devolución con snapshots y movimientos.
-- **Configuración:** `CompanySetting`/`BranchSetting`, fondo POS como archivo y grupos táctiles por sucursal están
-  conectados al backend. Sucursales persiste reglas comerciales, POS y ticket.
+- **Autenticación/RBAC:** login, refresh, logout, revocación por `tokenVersion`, roles activos, permisos y bypass seguro.
+- **Productos:** CRUD, baja lógica, paginación, búsqueda extensa, barcodes, import/export, precios/costos por sucursal,
+  proveedores, historial, cámara en administración móvil y buscador desktop.
+- **Stock backend:** ajustes, reposición depósito→local, movimientos, recepción, inventarios, mermas y transferencias.
+- **Compras backend:** órdenes, compras, confirmación/cancelación, factura asistida y matching con revisión humana.
+- **POS principal:** apertura/cierre de caja, scanner USB, grupos táctiles, pesables, carrito, descuentos, pagos mixtos,
+  vuelto, venta idempotente/transaccional, cancelación, devolución y ticket.
+- **Usuarios:** alta, edición, contraseña, roles, sucursales, activación y baja lógica con protección de `SUPER_ADMIN`.
+- **Auditoría:** consulta paginada multi-tenant y registro de operaciones sensibles.
 
-### Parcial o superficial
+### Parcial, frágil o no certificado
 
-- **Categorías:** CRUD jerárquico básico y asignación desde Producto. **Familias:** modelo y CRUD API existen, y el
-  listado muestra la familia, pero el frontend no consume `/product-families` ni permite administrarlas/asignarlas.
-- **Vencimientos/lotes:** modelo, consultas y recepción existen; la ruta visible sólo vuelca JSON técnico. No hay editor
-  de lotes en Producto, riesgo comercial, valor comprometido ni acciones de liquidación.
-- **Stock escritorio:** muestra y ajusta stock, pero no expone reposición depósito→local (sí existe en API y móvil). Las
-  vistas de movimientos/inventario/mermas/transferencias son genéricas y muestran JSON; varias quedan sólo como rutas
-  legadas. Al cambiar sucursal en el layout, `Stock` no recarga porque su efecto no depende de la sucursal seleccionada.
-- **Compras:** no hay recomendaciones explicables. Las altas de compra/orden cargan sólo los primeros 100 productos y
-  carecen de búsqueda remota, por lo que no son operables con catálogos grandes.
-- **Etiquetas:** se corrigió la hoja en blanco, la cola respeta su cantidad y cada alta con sucursal se agrega como
-  pendiente. Hay tres diseños físicos A4: Fleje (14 precios normales), Cartel FyV (9 carteles para frutas/verduras) y
-  A5 Liqui (liquidación/oferta). En la cola, imprimir no marca automáticamente; requiere una acción posterior separada.
-- **Sucursales:** tres tabs de la ficha (`ETIQUETAS`, `USUARIOS`, `PRODUCTOS`) son textos informativos, no superficies
-  funcionales. **Auditoría:** consulta datos reales y traduce acciones conocidas, pero filtra sólo por código y conserva
-  detalles JSON técnicos.
-- **POS/Caja:** flujo principal amplio, pero shortcuts y suspendidos siguen en almacenamiento del navegador; no hay
-  persistencia compartida de suspendidos, arqueo/retiros ni hardware fiscal (estos últimos fuera de alcance actual).
-- **Configuración:** seis bloques JSON y grupos POS son funcionales, pero no existe `UserPreference`; todavía queda una
-  caché local de ajustes POS y no hay editor central de shortcuts.
+- **Dashboard/reportes:** datos reales y monitor multi-sucursal; los límites hoy/ayer usan zona del proceso y pueden cortar
+  mal en producción UTC en vez de `America/Argentina/Buenos_Aires`.
+- **Categorías/familias:** categorías tienen CRUD jerárquico. `ProductFamily` tiene modelo/API y aparece en listados, pero
+  no existe gestión/asignación completa desde el frontend.
+- **Stock escritorio:** no expone reposición local aunque API y móvil sí; operaciones secundarias muestran JSON técnico.
+- **Vencimientos:** consulta y lotes existen, pero falta una UX comercial con riesgo, valor, filtros y edición desde ficha.
+- **Compras frontend:** las altas cargan sólo los primeros 100 productos; sin búsqueda remota no escalan al catálogo real.
+- **Proveedores:** ficha y relaciones funcionan; cuenta corriente no existe y permanece fuera del alcance aprobado.
+- **Etiquetas:** Fleje, Cartel FyV y A5 Liqui imprimen con composición física; falta calibración por impresora y marcar como
+  impresa sigue siendo una acción separada del diálogo del navegador.
+- **Terminales:** esquema, CRUD y apertura rápida existen. `posConfig` se persiste pero no tiene editor específico; la UI
+  genera `CAJA-${terminalesActivas + 1}`, que puede chocar con el índice único si hay terminales inactivas.
+- **Medios de pago:** existen y se autoinicializan. El endpoint de lectura requiere `sales.access`; Configuración lo llama
+  sin ocultar la sección por ese permiso, por lo que ciertos roles con `branches.settings` pueden recibir 403.
+- **Suspendidos:** funcionan sólo en el dispositivo. No hay modelo/API, concurrencia, recuperación multi-terminal ni
+  auditoría; no deben considerarse una venta `SUSPENDED` persistida pese a existir ese enum.
+- **Configuración:** settings de sucursal y grupos están en backend, pero `PosSettingsPage.tsx` legado todavía guarda otra
+  configuración local y puede divergir de `Settings.tsx`.
 
 ### Ausente
 
-- **Promociones/liquidaciones temporales:** no existe modelo Prisma, módulo API, permiso ni pantalla. Los descuentos
-  manuales de venta no sustituyen promociones 2x1/3x2/segunda unidad o por vencimiento.
-- Compras recomendadas, FEFO, OCR/LLM productivo y cuenta corriente de proveedor no están implementados. OCR automático,
-  cuenta corriente y hardware fiscal continúan explícitamente fuera del alcance actual.
+- Promociones temporales/2x1/3x2/segunda unidad y liquidaciones como regla comercial persistida.
+- Compras recomendadas, FEFO, OCR/LLM productivo, cuenta corriente de proveedor y hardware fiscal.
+- Suite HTTP/e2e con PostgreSQL, pruebas de migración y pruebas de concurrencia de venta/stock/caja.
+- Impresión nativa directa, arqueo contable y retiros de caja.
 
-## Duplicación, rutas obsoletas y conexiones sin uso
+## Errores y comportamientos problemáticos detectados
 
-- `App.tsx` todavía importa y registra componentes legados de Precios/Costos, Roles, Órdenes, Inventarios, Movimientos y
-  Transferencias, aunque varias rutas `/admin/...` se redirigen a las pantallas consolidadas. Persisten además alias
-  duplicados (`/products` y `/admin/products`, `/suppliers` y `/admin/suppliers`, etc.).
-- `PriceLists` y sus endpoints CRUD existen pero no están enlazados en la navegación; `PriceListItem` no tiene gestión
-  real desde la UI. Los endpoints masivos de costos existen, pero la UI consolidada usa principalmente precios.
-- Los componentes dedicados `PurchaseOrders`, `PurchaseOrderNew`, `Commerce` y varias variantes de `StockOperations`
-  permanecen compilados aunque sus rutas principales se redirigen o no se ofrecen. No deben evolucionarse como módulos
-  paralelos; hay que terminar la integración contextual y luego retirar sólo el código efectivamente inalcanzable.
-- La búsqueda global y la campana del layout son decorativas. Una ruta desconocida cae silenciosamente en Dashboard en
-  vez de mostrar 404. La autorización frontend de una ficha de sucursal dinámica no asigna un permiso específico, aunque
-  el backend sí exige `branches.view`.
+### Prioridad alta
 
-## Problemas prioritarios detectados
+1. **Cambio de sucursal con estado viejo:** `Stock` carga sólo al montar y lee `branchContext` imperativamente; cambiar el
+   selector puede dejar datos de la sucursal anterior. Otras pantallas lanzan requests sin cancelación, por lo que una
+   respuesta tardía puede sobrescribir la sucursal nueva y producir titileo visual.
+2. **Permisos de Configuración POS:** terminales y medios se renderizan desde una ruta autorizada por `branches.settings`,
+   pero las APIs exigen además `terminals.view/manage` y `sales.access/paymentMethods.manage`. La UI no filtra todas esas
+   acciones; el resultado puede ser 403, promesa rechazada o controles visibles que luego fallan.
+3. **Código de terminal rápido:** se calcula con la cantidad de terminales activas cargadas. Una terminal inactiva con el
+   mismo código provoca violación de unicidad y un mensaje poco orientativo.
+4. **Sin prueba real de la última migración:** schema y SQL son coherentes y Prisma valida, pero no se aplicó la migración
+   sobre una copia PostgreSQL ni se probó rollback/compatibilidad de despliegue.
 
-1. **Validación real pendiente:** montar PostgreSQL de prueba, aplicar las 18 migraciones y ejecutar pruebas HTTP/e2e de
-   tenant/sucursal, compra→recepción, stock, caja→venta→anulación/devolución y permisos.
-2. **Fechas contables:** Dashboard calcula límites diarios con `Date`/zona del proceso; no fija
-   `America/Argentina/Buenos_Aires`, por lo que hoy/ayer y series pueden cortar mal en producción UTC.
-3. **Escalabilidad de compras:** reemplazar la carga fija de 100 productos por búsqueda backend paginada.
-4. **Contexto de sucursal:** hacer reactiva la pantalla Stock y auditar las demás pantallas que leen `branchContext`
-   directamente para evitar datos visualmente obsoletos después de cambiar el selector.
-5. **Superficies incompletas:** integrar familias, lotes/vencimientos, reposición desktop, operaciones de stock y
-   etiquetas profesionales sin reabrir módulos duplicados.
-6. **Higiene de entrega:** automatizar `prisma:generate` en instalación/CI o documentar su precondición; permitir un build
-   de compilación sin secretos reales. `npm ci` reporta 8 vulnerabilidades (1 moderada, 7 altas; requieren revisión, no
-   `audit fix --force` ciego).
+### Prioridad media
 
-## Decisiones vigentes y siguiente paso
+5. **Búsquedas y feedback:** búsquedas POS menores de dos caracteres fallan por diseño; varias pantallas no cancelan
+   requests previos ni exponen siempre loading/error. El scanner desktop de Productos deja el modal abierto si la cámara
+   falla, mientras el mensaje queda detrás del backdrop.
+6. **Rutas y recargas:** el router es manual y navega con `window.location.href`, por lo que cada cambio de sección recarga
+   la SPA. Los redirects se ejecutan durante render y rutas desconocidas caen silenciosamente en Dashboard; esto explica
+   recargas completas, cambios visuales y rutas que parecen titilar, aunque no se detectó un loop infinito reproducible.
+7. **Inicialización POS acoplada:** un `Promise.all` carga caja, pagos, catálogo y settings. Si falla una sola API, toda la
+   preparación se marca offline y puede ocultar datos que sí estaban disponibles.
+8. **Configuración duplicada:** `Settings.tsx` es la autoridad servidor; `PosSettingsPage.tsx` y helpers locales son legado.
+9. **Listados no escalables:** compras/órdenes usan un lote fijo de 100 productos; ventas administrativas toman hasta 100;
+   varias operaciones de stock no tienen UI paginada útil.
+10. **Calidad de contratos:** abundan `any`, tipos frontend duplicados y módulos Nest de cientos de líneas; compilan, pero
+    aumentan el riesgo de que un cambio de DTO rompa la UI sin test HTTP/contrato.
 
-- PostgreSQL/API central siguen siendo la única autoridad comercial; no reintroducir offline comercial.
-- Producto/Stock/Compras/Usuarios son las superficies consolidadas; conservar redirects mientras existan enlaces o
-  marcadores antiguos y no crear secciones principales duplicadas.
-- No se agregó funcionalidad ni migración en esta auditoría. Próximo paso recomendado: preparar una base PostgreSQL
-  aislada y una suite smoke HTTP multi-tenant antes de continuar con funcionalidades.
+## Duplicado, legado o sin uso claro
 
-## Cambio posterior — 2026-09-04
+- Rutas/componentes de Precios, Costos, Roles, Órdenes, Inventarios, Movimientos y Transferencias siguen compilados aunque
+  las rutas principales redirigen a Productos, Usuarios, Compras o Stock.
+- Alias `/products`/`/admin/products`, `/suppliers`/`/admin/suppliers` y otros conservan compatibilidad pero duplican mapa.
+- `PriceLists` y endpoints existen sin navegación principal; `PriceListItem` carece de gestión completa.
+- `PosSettingsPage.tsx`, `loadPosSettings` y `savePosSettings` son una segunda fuente local frente a settings servidor.
+- Búsqueda global y campana del layout son decorativas.
+- `SaleStatus.SUSPENDED` existe, pero los suspendidos actuales no usan `Sale` ni PostgreSQL.
 
-- Productos de escritorio incorpora scanner de códigos con cámara en la búsqueda; el valor leído dispara una consulta
-  backend paginada sin descargar el catálogo.
-- Las etiquetas recuperan visibilidad exclusiva en CSS de impresión y esperan el render antes de abrir el diálogo. Toda
-  alta con configuración de sucursal crea, dentro de la misma transacción, una etiqueta pendiente con el precio inicial.
-- Se reemplazan las plantillas genéricas por Fleje, Cartel FyV y A5 Liqui, con composición en milímetros, precio sin
-  impuestos, precio por unidad de medida y densidades de 14 y 9 carteles por hoja A4 según corresponda.
-- Sin migraciones ni cambios de permisos. Queda pendiente calibrar márgenes contra el modelo físico de cada impresora.
+## Dependencias entre módulos
 
-## POS operativo — 2026-09-04
+- **POS** depende de Auth/RBAC → acceso de sucursal → Terminal/CashSession → Product/BranchProduct/PriceList → Stock →
+  PaymentMethod → Sale/Payment/Audit → Ticket.
+- **Compras** depende de Supplier/SupplierProduct → Product/BranchProduct → CostHistory → Stock/StockLot → Audit.
+- **Productos** alimenta Stock, Compras, POS, Etiquetas y Dashboard; cambios de identidad no deben romper snapshots.
+- **Dashboard** depende de ventas, pagos, stock, lotes y sesiones de caja, y debe filtrar tenant/sucursal.
+- **Configuración** alimenta POS, apariencia, grupos rápidos y reglas de sucursal; no puede depender sólo de localStorage.
 
-- Se completó la apertura guiada por sucursal, cajero, terminal y fondo. Si no hay terminal, un usuario con
-  `terminals.manage` puede crearla en el mismo flujo; los demás reciben un error accionable.
-- Terminal incorpora impresora opcional y configuración JSON; Configuración POS administra terminales, medios de pago,
-  apariencia, modo táctil, ticket automático y grupos rápidos. Una empresa sin medios recibe seis valores iniciales:
-  Efectivo, Débito, Crédito, Transferencia, Mercado Pago y Otro.
-- El cobro admite pagos mixtos, referencia según el medio, efectivo recibido y vuelto destacado. Las líneas conservan
-  nota opcional, y la búsqueda POS suma SKU, códigos/descripciones de proveedor y aliases.
-- La venta continúa siendo una única transacción serializable con ítems, pagos, stock, terminal/cajero y auditoría. El
-  ticket permite imprimir/reimprimir, omitir impresión y comenzar inmediatamente otra venta.
-- Migración `20260904170000_pos_terminal_and_line_notes`: agrega `Terminal.printerName`, `Terminal.posConfig` y
-  `SaleItem.note`. Suspendidos continúan locales a este dispositivo; su persistencia compartida sigue pendiente.
+## Riesgos de migración y despliegue
+
+- La migración `20260904170000_pos_terminal_and_line_notes` es aditiva y no destructiva, pero debe aplicarse antes de
+  ejecutar código que escriba `SaleItem.note` o `Terminal.printerName/posConfig`.
+- No editar migraciones desplegadas. Toda corrección posterior debe ser una migración nueva.
+- El autoinicializado de medios ocurre al primer GET y escribe en producción; es idempotente por índice único, pero debe
+  probarse con solicitudes concurrentes.
+- El build y `prisma:generate` del workspace API requieren `.env`; una instalación limpia falla antes de compilar si no
+  existe. El deploy productivo conserva `.env` y aplica `prisma migrate deploy`.
+- No se verificaron datos reales, volumen, locks serializables ni compatibilidad con migraciones ya aplicadas.
+
+## Verificaciones de esta auditoría
+
+- Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 18 SQL.
+- Se ejecutan como controles locales: lint, typecheck, 19 tests frontend, 52 tests backend, build y `check:release`.
+- PostgreSQL/Redis HTTP/e2e quedan **no ejecutados** por falta de servicios/credenciales en el entorno de auditoría.
+
+## Orden de trabajo recomendado (sin implementarlo ahora)
+
+1. Levantar PostgreSQL efímero, aplicar las 18 migraciones y crear smoke tests HTTP multi-tenant.
+2. Probar en orden: login → sucursal → terminal → caja → catálogo → pago mixto → venta → stock → ticket → anulación.
+3. Corregir permisos/errores de Configuración POS y la generación robusta de códigos de terminal.
+4. Hacer reactivo y cancelable el contexto de sucursal; eliminar respuestas tardías y cargas acopladas del bootstrap POS.
+5. Consolidar settings POS en servidor y retirar sólo la ruta/helper local cuando ya no tenga consumidores.
+6. Corregir zona horaria de reportes y búsqueda paginada de compras.
+7. Completar luego las superficies ya existentes (familias, vencimientos, stock desktop), sin abrir módulos duplicados.
+
+## Decisiones vigentes
+
+- No se implementaron cambios funcionales ni migraciones en esta auditoría; sólo se actualizó este estado técnico.
+- PostgreSQL/API central siguen siendo la autoridad comercial y el navegador no será fuente de verdad.
+- Conservar transacciones, snapshots, soft delete, idempotencia, tenant/sucursal, redirects compatibles y bypass de
+  `SUPER_ADMIN`.
