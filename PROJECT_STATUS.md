@@ -8,9 +8,9 @@ en esta auditoría** porque el entorno no dispone de PostgreSQL/Redis ni Docker 
 HTTP/e2e reales. La cobertura actual protege cálculos y políticas puntuales, pero no prueba una venta concurrente completa.
 
 El flujo más maduro es producto → configuración de sucursal → catálogo POS → carrito → cobro → venta/pagos → movimiento
-de stock → ticket. Los mayores riesgos actuales son: cambios de sucursal no reactivos o con respuestas tardías, permisos
-inconsistentes en Configuración POS, alta rápida de terminal con códigos potencialmente repetidos, fechas de reportes en
-UTC y ausencia de pruebas integradas sobre la base real.
+de stock → ticket. La navegación y restauración de sesión ya fueron estabilizadas; los mayores riesgos pendientes son
+requests tardíos dentro de páginas concretas, permisos inconsistentes en Configuración POS, alta rápida de terminal con
+códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de pruebas integradas sobre la base real.
 
 ## Arquitectura comprobada
 
@@ -120,9 +120,9 @@ UTC y ausencia de pruebas integradas sobre la base real.
 
 ### Prioridad alta
 
-1. **Cambio de sucursal con estado viejo:** `Stock` carga sólo al montar y lee `branchContext` imperativamente; cambiar el
-   selector puede dejar datos de la sucursal anterior. Otras pantallas lanzan requests sin cancelación, por lo que una
-   respuesta tardía puede sobrescribir la sucursal nueva y producir titileo visual.
+1. **Requests tardíos dentro de una misma sucursal:** cambiar de sucursal ahora remonta el contenido y evita conservar su
+   estado anterior. Aun así, algunas búsquedas lanzan requests sin cancelación y una respuesta antigua puede reemplazar
+   una búsqueda más reciente dentro de la misma pantalla.
 2. **Permisos de Configuración POS:** terminales y medios se renderizan desde una ruta autorizada por `branches.settings`,
    pero las APIs exigen además `terminals.view/manage` y `sales.access/paymentMethods.manage`. La UI no filtra todas esas
    acciones; el resultado puede ser 403, promesa rechazada o controles visibles que luego fallan.
@@ -136,9 +136,9 @@ UTC y ausencia de pruebas integradas sobre la base real.
 5. **Búsquedas y feedback:** búsquedas POS menores de dos caracteres fallan por diseño; varias pantallas no cancelan
    requests previos ni exponen siempre loading/error. El scanner desktop de Productos deja el modal abierto si la cámara
    falla, mientras el mensaje queda detrás del backdrop.
-6. **Rutas y recargas:** el router es manual y navega con `window.location.href`, por lo que cada cambio de sección recarga
-   la SPA. Los redirects se ejecutan durante render y rutas desconocidas caen silenciosamente en Dashboard; esto explica
-   recargas completas, cambios visuales y rutas que parecen titilar, aunque no se detectó un loop infinito reproducible.
+6. **Cobertura de rutas:** la navegación interna y los redirects legados ya usan History API sin recargar el documento ni
+   mutar historial durante render. Las rutas desconocidas muestran una salida 404 clara en lugar de caer silenciosamente
+   en Dashboard; falta una prueba e2e que recorra todos los enlaces visibles por cada combinación de permisos.
 7. **Inicialización POS acoplada:** un `Promise.all` carga caja, pagos, catálogo y settings. Si falla una sola API, toda la
    preparación se marca offline y puede ocultar datos que sí estaban disponibles.
 8. **Configuración duplicada:** `Settings.tsx` es la autoridad servidor; `PosSettingsPage.tsx` y helpers locales son legado.
@@ -180,22 +180,40 @@ UTC y ausencia de pruebas integradas sobre la base real.
 ## Verificaciones de esta auditoría
 
 - Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 18 SQL.
-- Se ejecutan como controles locales: lint, typecheck, 19 tests frontend, 52 tests backend, build y `check:release`.
+- Se ejecutan como controles locales: lint, typecheck, 22 tests frontend, 52 tests backend, build y `check:release`.
 - PostgreSQL/Redis HTTP/e2e quedan **no ejecutados** por falta de servicios/credenciales en el entorno de auditoría.
+
+## Estabilización de arquitectura — 2026-09-05
+
+- La navegación interna usa History API y un único listener `popstate`; enlaces bajo `/pos/` se interceptan sin recarga
+  completa y los enlaces externos/modificados conservan el comportamiento normal del navegador.
+- Los redirects legados ya no escriben historial durante render. La ruta protegida de detalle de sucursal exige ahora
+  `branches.view`, igual que el listado.
+- `/auth/me` puede renovar un access token vencido. Un logout propagado por `BroadcastChannel` limpia también el usuario
+  React de las demás pestañas, sin borrar carrito u otros datos mediante `sessionStorage.clear()`.
+- La sucursal conserva una preferencia persistente, pero cada pestaña fija su propia selección en `sessionStorage`; al
+  cambiarla se remonta el contenido del módulo para impedir que quede visible estado perteneciente a la sucursal anterior.
+- El cliente reintenta una sola vez únicamente requests GET fallidos por red; nunca reintenta escrituras. Los errores
+  exponen mensaje, estado HTTP y código sin transformar una caída de red en cierre de sesión.
+- El filtro global backend registra método, ruta, usuario, estado y código; sólo incluye stack en errores 5xx y nunca
+  registra headers, tokens, body ni credenciales.
+- No hubo cambios Prisma, migraciones, permisos ni reglas comerciales. Sigue pendiente cancelar búsquedas particulares,
+  desacoplar el bootstrap POS y validar múltiples pestañas mediante una prueba e2e en navegador real.
 
 ## Orden de trabajo recomendado (sin implementarlo ahora)
 
 1. Levantar PostgreSQL efímero, aplicar las 18 migraciones y crear smoke tests HTTP multi-tenant.
 2. Probar en orden: login → sucursal → terminal → caja → catálogo → pago mixto → venta → stock → ticket → anulación.
 3. Corregir permisos/errores de Configuración POS y la generación robusta de códigos de terminal.
-4. Hacer reactivo y cancelable el contexto de sucursal; eliminar respuestas tardías y cargas acopladas del bootstrap POS.
+4. Cancelar búsquedas anteriores y desacoplar las cargas del bootstrap POS para tolerar fallos parciales.
 5. Consolidar settings POS en servidor y retirar sólo la ruta/helper local cuando ya no tenga consumidores.
 6. Corregir zona horaria de reportes y búsqueda paginada de compras.
 7. Completar luego las superficies ya existentes (familias, vencimientos, stock desktop), sin abrir módulos duplicados.
 
 ## Decisiones vigentes
 
-- No se implementaron cambios funcionales ni migraciones en esta auditoría; sólo se actualizó este estado técnico.
+- La estabilización modificó infraestructura transversal del frontend y logging backend, sin cambiar reglas comerciales,
+  esquema, migraciones ni permisos.
 - PostgreSQL/API central siguen siendo la autoridad comercial y el navegador no será fuente de verdad.
 - Conservar transacciones, snapshots, soft delete, idempotencia, tenant/sucursal, redirects compatibles y bypass de
   `SUPER_ADMIN`.
