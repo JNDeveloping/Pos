@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
+  Activity,
   Bell,
   Boxes,
   Building2,
@@ -43,6 +44,7 @@ const groups: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = [
       ['/admin/suppliers', 'Proveedores', Truck, 'suppliers.view'],
       ['/labels', 'Etiquetas', Printer, 'labels.view'],
       ['/', 'Abrir POS', Store, 'sales.access'],
+      ['/admin/cash-live', 'Cajas en vivo', Activity, 'sales.liveView'],
     ],
   },
   {

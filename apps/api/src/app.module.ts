@@ -20,6 +20,7 @@ import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { PurchasesModule } from './modules/purchases/purchases.module';
 import { StockModule } from './modules/stock/stock.module';
 import { SalesModule } from './modules/sales/sales.module';
+import { PosLiveModule } from './modules/pos-live/pos-live.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '../../.env' }),
@@ -41,6 +42,7 @@ import { SalesModule } from './modules/sales/sales.module';
     PurchasesModule,
     StockModule,
     SalesModule,
+    PosLiveModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })
