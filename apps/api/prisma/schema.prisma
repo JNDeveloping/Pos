@@ -67,6 +67,16 @@ enum UnitType {
   METER
 }
 
+enum PaymentMethodKind {
+  CASH
+  DEBIT
+  CREDIT
+  TRANSFER
+  QR
+  ACCOUNT
+  OTHER
+}
+
 model Company {
   id               String            @id @default(uuid()) @db.Uuid
   name             String
@@ -522,6 +532,7 @@ model PaymentMethod {
   companyId         String    @db.Uuid
   code              String
   name              String
+  kind              PaymentMethodKind @default(OTHER)
   active            Boolean   @default(true)
   requiresReference Boolean   @default(false)
   sortOrder         Int       @default(0)
@@ -599,6 +610,7 @@ model Payment {
   paymentMethodId String        @db.Uuid
   paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id])
   amount          Decimal       @db.Decimal(14, 2)
+  cashImpact      Decimal       @default(0) @db.Decimal(14, 2)
   receivedAmount  Decimal?      @db.Decimal(14, 2)
   changeAmount    Decimal?      @db.Decimal(14, 2)
   reference       String?

@@ -119,6 +119,7 @@ const modules: Record<string, string[]> = {
     'sales.discountItem|Aplicar descuento por ítem',
     'sales.discountSale|Aplicar descuento general',
     'sales.manualPrice|Ingresar precio manual',
+    'sales.accountCredit|Cobrar a cuenta corriente',
     'sales.reprintTicket|Reimprimir tickets',
     'sales.authorizeDiscount|Autorizar descuentos',
   ],

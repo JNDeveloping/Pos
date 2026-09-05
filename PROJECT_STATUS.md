@@ -19,8 +19,8 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 - `apps/api`: NestJS 11, guard JWT/RBAC global, Prisma 6, PostgreSQL y Redis tolerante a fallos.
 - API pública esperada en `/pos/api`; Nest usa `/api` y escucha internamente en `127.0.0.1:3002`.
 - La PWA sólo precachea shell/assets. No hay IndexedDB, caché de respuestas API ni fuente comercial offline.
-- Existen 19 migraciones inmutables. La última, `20260905130000_pos_quick_sale_lines`, permite líneas rápidas sin producto
-  manteniendo snapshots contables y sin generar movimientos de stock ficticios.
+- Existen 20 migraciones inmutables. La última, `20260905170000_payment_method_nature`, clasifica la naturaleza de cada
+  medio y registra el impacto efectivo de cada pago sin alterar históricos.
 - `packages/shared` sigue reservado; los contratos frontend/backend continúan duplicados localmente.
 
 ## Mapa de datos y relaciones principales
@@ -171,16 +171,16 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 - La migración `20260904170000_pos_terminal_and_line_notes` es aditiva y no destructiva, pero debe aplicarse antes de
   ejecutar código que escriba `SaleItem.note` o `Terminal.printerName/posConfig`.
 - No editar migraciones desplegadas. Toda corrección posterior debe ser una migración nueva.
-- El autoinicializado de medios ocurre al primer GET y escribe en producción; es idempotente por índice único, pero debe
-  probarse con solicitudes concurrentes.
+- El autoinicializado de medios completa faltantes en cada GET y es idempotente por índice único; debe probarse con
+  solicitudes concurrentes sobre PostgreSQL.
 - El build y `prisma:generate` del workspace API requieren `.env`; una instalación limpia falla antes de compilar si no
   existe. El deploy productivo conserva `.env` y aplica `prisma migrate deploy`.
 - No se verificaron datos reales, volumen, locks serializables ni compatibilidad con migraciones ya aplicadas.
 
 ## Verificaciones de esta auditoría
 
-- Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 19 SQL.
-- Se ejecutan como controles locales: lint, typecheck, 24 tests frontend, 53 tests backend, build y `check:release`.
+- Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 20 SQL.
+- Se ejecutan como controles locales: lint, typecheck, 24 tests frontend, 54 tests backend, build y `check:release`.
 - PostgreSQL/Redis HTTP/e2e quedan **no ejecutados** por falta de servicios/credenciales en el entorno de auditoría.
 
 ## Estabilización de arquitectura — 2026-09-05
@@ -219,9 +219,26 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 - La migración nueva sólo vuelve opcionales tres referencias escalares históricas; no elimina tablas ni datos. Antes de
   producción debe aplicarse y probarse sobre PostgreSQL con venta, anulación y devolución rápida.
 
+## Medios de pago y cierre de venta — 2026-09-05
+
+- Cada medio tiene naturaleza persistida: efectivo, débito, crédito, transferencia, QR/billetera, cuenta corriente u otro.
+  Los valores iniciales completan Efectivo, Débito, Crédito, Transferencia, QR/Mercado Pago, Cuenta corriente y Otro sin
+  borrar ni duplicar configuraciones existentes.
+- El cobro combinado exige que la suma redondeada de todos los medios coincida exactamente con el total. Efectivo separa
+  importe aplicado, importe recibido y vuelto; los otros medios no generan efectivo en caja.
+- Cuenta corriente exige referencia de cliente/cuenta y el permiso nuevo `sales.accountCredit`; sin autorización no se
+  muestra en el POS y el backend también rechaza el cobro. No se implementó todavía un mayor de clientes o límite crediticio.
+- `Payment.cashImpact` conserva el importe que físicamente ingresó en efectivo. Al cerrar caja se calcula apertura más
+  efectivo de ventas completadas, se devuelve diferencia contra lo contado y se guarda el desglose en auditoría.
+- El frontend conserva un `operationId` durante todo el intento y bloquea confirmaciones concurrentes. Si dos requests con
+  el mismo identificador compiten, el backend recupera y devuelve la venta confirmada en lugar de duplicarla.
+- Venta, items, pagos, impacto efectivo, stock y auditoría permanecen en una única transacción serializable. La migración
+  `20260905170000_payment_method_nature` es aditiva, pero requiere deploy y `permissions:sync` antes de habilitar cuenta
+  corriente a roles autorizados.
+
 ## Orden de trabajo recomendado (sin implementarlo ahora)
 
-1. Levantar PostgreSQL efímero, aplicar las 19 migraciones y crear smoke tests HTTP multi-tenant.
+1. Levantar PostgreSQL efímero, aplicar las 20 migraciones y crear smoke tests HTTP multi-tenant.
 2. Probar en orden: login → sucursal → terminal → caja → catálogo → pago mixto → venta → stock → ticket → anulación.
 3. Corregir permisos/errores de Configuración POS y la generación robusta de códigos de terminal.
 4. Desacoplar las cargas del bootstrap POS para tolerar fallos parciales.
@@ -231,7 +248,8 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 
 ## Decisiones vigentes
 
-- La estabilización y el POS modificaron frontend, backend y una migración aditiva; no cambiaron el catálogo de permisos.
+- La estabilización y el POS modificaron frontend, backend y migraciones aditivas; cuenta corriente agregó el permiso
+  `sales.accountCredit`, que debe asignarse sólo a roles expresamente autorizados.
 - PostgreSQL/API central siguen siendo la autoridad comercial y el navegador no será fuente de verdad.
 - Conservar transacciones, snapshots, soft delete, idempotencia, tenant/sucursal, redirects compatibles y bypass de
   `SUPER_ADMIN`.

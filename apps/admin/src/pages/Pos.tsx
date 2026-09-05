@@ -33,7 +33,7 @@ import { DEFAULT_POS_SETTINGS, type PosSettings } from '../lib/pos-settings';
 import { appPath } from '../lib/navigation';
 import { API } from '../lib/api';
 
-type Method = { id: string; code: string; name: string; requiresReference: boolean; active?: boolean };
+type Method = { id: string; code: string; name: string; kind?: 'CASH' | 'DEBIT' | 'CREDIT' | 'TRANSFER' | 'QR' | 'ACCOUNT' | 'OTHER'; requiresReference: boolean; active?: boolean };
 type Terminal = { id: string; name: string; code: string; branchId: string; active?: boolean; printerName?: string };
 type QuickGroup = { id: string; name: string; icon?: string; buttonSize?: string; kind?: 'GROUP' | 'CATEGORY' };
 type Cashier = { id: string; firstName: string; lastName: string; username: string };
@@ -108,6 +108,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
   const discount = subtotal - total;
   const focusScanner = useCallback(() => setTimeout(() => scanner.current?.focus(), 0), []);
   const searchRequest = useRef<AbortController | undefined>(undefined);
+  const saleOperationId = useRef(crypto.randomUUID());
 
   useEffect(() => {
     if (!branch) return;
@@ -787,6 +788,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
         <PaymentModal
           total={total}
           methods={methods}
+          canAccountCredit={hasPermission(me, 'sales.accountCredit')}
           busy={busy}
           close={() => {
             setModal(null);
@@ -799,7 +801,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
               const sale = await api('/sales', {
                 method: 'POST',
                 body: JSON.stringify({
-                  operationId: crypto.randomUUID(),
+                  operationId: saleOperationId.current,
                   branchId: branch.id,
                   terminalId,
                   cashSessionId: cashSession?.id,
@@ -818,6 +820,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
               });
               setModal(null);
               setTicket(sale);
+              saleOperationId.current = crypto.randomUUID();
             } catch (error) {
               setMessage({ kind: 'error', text: (error as Error).message });
               setModal(null);
@@ -1158,44 +1161,53 @@ function UtilitiesModal({ branchId, close }: { branchId?: string; recent: () => 
 function PaymentModal({
   total,
   methods,
+  canAccountCredit,
   busy,
   close,
   confirm,
 }: {
   total: number;
   methods: Method[];
+  canAccountCredit: boolean;
   busy: boolean;
   close: () => void;
   confirm: (rows: any[]) => Promise<void>;
 }) {
+  const submitting = useRef(false);
+  const availableMethods = methods.filter((method) => method.kind !== 'ACCOUNT' || canAccountCredit);
   const [rows, setRows] = useState([
-    { paymentMethodId: methods[0]?.id ?? '', amount: total, receivedAmount: total, reference: '' },
+    { paymentMethodId: availableMethods[0]?.id ?? '', amount: total, receivedAmount: total, reference: '' },
   ]);
-  const { remaining, change } = paymentSummary(total, rows.map((row) => ({ amount: Number(row.amount), receivedAmount: Number(row.receivedAmount), isCash: methods.find((item) => item.id === row.paymentMethodId)?.code === 'CASH' })));
+  const { remaining, change } = paymentSummary(total, rows.map((row) => ({ amount: Number(row.amount), receivedAmount: Number(row.receivedAmount), isCash: availableMethods.find((item) => item.id === row.paymentMethodId)?.kind === 'CASH' || availableMethods.find((item) => item.id === row.paymentMethodId)?.code === 'CASH' })));
+  const submit = async () => {
+    if (submitting.current || busy || remaining !== 0) return;
+    submitting.current = true;
+    try { await confirm(rows); } finally { submitting.current = false; }
+  };
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       const code: { [k: string]: string } = { e: 'CASH', d: 'DEBIT', c: 'CREDIT', m: 'MERCADO_PAGO', t: 'TRANSFER' };
-      const method = methods.find((x) => x.code === code[e.key.toLowerCase()]);
+      const method = availableMethods.find((x) => x.code === code[e.key.toLowerCase()] || (code[e.key.toLowerCase()] === 'MERCADO_PAGO' && x.kind === 'QR'));
       if (method && !['INPUT', 'SELECT'].includes((e.target as HTMLElement).tagName)) {
         e.preventDefault();
         setRows([{ paymentMethodId: method.id, amount: total, receivedAmount: total, reference: '' }]);
       }
       if (e.key === 'Enter' && remaining === 0 && !busy && (e.target as HTMLElement).tagName !== 'BUTTON') {
         e.preventDefault();
-        void confirm(rows);
+        void submit();
       }
     };
     addEventListener('keydown', key);
     return () => removeEventListener('keydown', key);
-  }, [busy, confirm, methods, remaining, rows, total]);
+  }, [availableMethods, busy, remaining, rows, total]);
   return (
     <ModalFrame title="Cobrar venta" close={close}>
       <div className="payment-total">
         TOTAL <b>{money(total)}</b>
       </div>
       <div className="payment-method-buttons">
-        {!methods.length && <p className="pos-feedback error">No hay medios de pago configurados. Recargá el POS o pedí a un administrador que revise la configuración.</p>}
-        {methods.map((m) => (
+        {!availableMethods.length && <p className="pos-feedback error">No hay medios de pago habilitados para tu usuario.</p>}
+        {availableMethods.map((m) => (
           <button
             key={m.id}
             onClick={() => setRows([{ paymentMethodId: m.id, amount: total, receivedAmount: total, reference: '' }])}
@@ -1218,13 +1230,13 @@ function PaymentModal({
         ))}
       </div>
       {rows.map((row, index) => {
-        const method = methods.find((item) => item.id === row.paymentMethodId);
+        const method = availableMethods.find((item) => item.id === row.paymentMethodId);
         return <div className="payment-row" key={index}>
           <select
             value={row.paymentMethodId}
             onChange={(e) => setRows(rows.map((x, i) => (i === index ? { ...x, paymentMethodId: e.target.value } : x)))}
           >
-            {methods.map((m) => (
+            {availableMethods.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
               </option>
@@ -1235,7 +1247,7 @@ function PaymentModal({
             value={row.amount}
             onChange={(e) => setRows(rows.map((x, i) => (i === index ? { ...x, amount: Number(e.target.value) } : x)))}
           />
-          {method?.code === 'CASH' ? <input type="number" min={row.amount} step="0.01" value={row.receivedAmount} onChange={(e) => setRows(rows.map((x, i) => (i === index ? { ...x, receivedAmount: Number(e.target.value) } : x)))} placeholder="Efectivo recibido"/> : <input value={row.reference} required={method?.requiresReference} onChange={(e) => setRows(rows.map((x, i) => (i === index ? { ...x, reference: e.target.value } : x)))} placeholder={method?.requiresReference ? 'Referencia / comprobante' : 'Referencia opcional'}/>}
+          {method?.kind === 'CASH' || method?.code === 'CASH' ? <input type="number" min={row.amount} step="0.01" value={row.receivedAmount} onChange={(e) => setRows(rows.map((x, i) => (i === index ? { ...x, receivedAmount: Number(e.target.value) } : x)))} placeholder="Efectivo recibido"/> : <input value={row.reference} required={method?.requiresReference || method?.kind === 'ACCOUNT'} onChange={(e) => setRows(rows.map((x, i) => (i === index ? { ...x, reference: e.target.value } : x)))} placeholder={method?.kind === 'ACCOUNT' ? 'Cliente / cuenta corriente' : method?.requiresReference ? 'Referencia / comprobante' : 'Referencia opcional'}/>}
           {rows.length > 1 && <button type="button" aria-label="Quitar medio" onClick={() => setRows(rows.filter((_, i) => i !== index))}><X/></button>}
         </div>;
       })}
@@ -1245,7 +1257,7 @@ function PaymentModal({
           setRows([
             ...rows,
             {
-              paymentMethodId: methods[0]?.id ?? '',
+              paymentMethodId: availableMethods[0]?.id ?? '',
               amount: Math.max(0, remaining),
               receivedAmount: Math.max(0, remaining),
               reference: '',
@@ -1260,7 +1272,7 @@ function PaymentModal({
         <b>{money(remaining)}</b>
       </div>
       {change > 0 && <div className="payment-change"><span>VUELTO</span><b>{money(change)}</b></div>}
-      <button className="pos-pay" disabled={busy || remaining !== 0 || !methods.length || rows.some((row) => { const method = methods.find((item) => item.id === row.paymentMethodId); return !row.paymentMethodId || (method?.requiresReference && !row.reference.trim()); })} onClick={() => void confirm(rows)}>
+      <button className="pos-pay" disabled={busy || remaining !== 0 || !availableMethods.length || rows.some((row) => { const method = availableMethods.find((item) => item.id === row.paymentMethodId); return !row.paymentMethodId || ((method?.requiresReference || method?.kind === 'ACCOUNT') && !row.reference.trim()); })} onClick={() => void submit()}>
         {busy ? 'PROCESANDO…' : 'CONFIRMAR · ENTER'}
       </button>
     </ModalFrame>

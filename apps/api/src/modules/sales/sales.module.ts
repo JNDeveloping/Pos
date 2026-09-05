@@ -12,12 +12,13 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { Prisma, SaleStatus, StockMovementType } from '@prisma/client';
+import { PaymentMethodKind, Prisma, SaleStatus, StockMovementType } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
   IsInt,
+  IsEnum,
   IsNumber,
   IsObject,
   IsOptional,
@@ -76,6 +77,7 @@ class ConfigDto {
   @IsString() @MinLength(2) name!: string;
   @IsOptional() @IsBoolean() active?: boolean;
   @IsOptional() @IsBoolean() requiresReference?: boolean;
+  @IsOptional() @IsEnum(PaymentMethodKind) kind?: PaymentMethodKind;
   @IsOptional() @IsInt() sortOrder?: number;
 }
 class TerminalDto {
@@ -137,7 +139,7 @@ export class PriceResolutionService {
 }
 
 @Injectable()
-class SalesService {
+export class SalesService {
   constructor(
     private db: PrismaService,
     private stock: StockService,
@@ -156,7 +158,8 @@ class SalesService {
     const registeredIds = dto.items.flatMap((item) => item.productId ? [item.productId] : []);
     if (new Set(registeredIds).size !== registeredIds.length)
       throw new BadRequestException('Un producto no puede repetirse en varias líneas');
-    return this.db.$transaction(
+    try {
+      return await this.db.$transaction(
       async (tx) => {
         const branch = await tx.branch.findFirst({ where: { id: dto.branchId, companyId: s.companyId, active: true } });
         const terminal = await tx.terminal.findFirst({
@@ -247,7 +250,11 @@ class SalesService {
           const method = methods.find((m) => m.id === payment.paymentMethodId)!;
           if (method.requiresReference && !payment.reference)
             throw new BadRequestException(`${method.name} requiere referencia`);
-          if (method.code === 'CASH' && (payment.receivedAmount ?? payment.amount) < payment.amount)
+          if (method.kind === PaymentMethodKind.ACCOUNT && !sessionCan(s, 'sales.accountCredit'))
+            throw new BadRequestException('No tiene permiso para cobrar a cuenta corriente');
+          if (method.kind === PaymentMethodKind.ACCOUNT && !payment.reference?.trim())
+            throw new BadRequestException('Cuenta corriente requiere identificar al cliente o cuenta');
+          if (method.kind === PaymentMethodKind.CASH && (payment.receivedAmount ?? payment.amount) < payment.amount)
             throw new BadRequestException('Efectivo recibido insuficiente');
         }
         const numbered = await tx.terminal.update({
@@ -300,8 +307,9 @@ class SalesService {
                 return {
                   paymentMethodId: p.paymentMethodId,
                   amount: p.amount,
-                  receivedAmount: method.code === 'CASH' ? received : undefined,
-                  changeAmount: method.code === 'CASH' ? received.minus(p.amount) : undefined,
+                  cashImpact: method.kind === PaymentMethodKind.CASH ? p.amount : 0,
+                  receivedAmount: method.kind === PaymentMethodKind.CASH ? received : undefined,
+                  changeAmount: method.kind === PaymentMethodKind.CASH ? received.minus(p.amount) : undefined,
                   reference: p.reference,
                 };
               }),
@@ -352,13 +360,23 @@ class SalesService {
               userId: s.sub,
               entityType: 'SALE',
               entityId: sale.id,
-            action: lines.some((line) => !line.input.productId) ? 'SALE_QUICK_LINE' : 'SALE_MANUAL_PRICE',
+              action: lines.some((line) => !line.input.productId) ? 'SALE_QUICK_LINE' : 'SALE_MANUAL_PRICE',
             },
           });
         return this.visible(s, sale);
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+      );
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const completed = await this.db.sale.findUnique({
+          where: { operationId: dto.operationId },
+          include: { items: true, payments: { include: { paymentMethod: true } } },
+        });
+        if (completed?.companyId === s.companyId) return this.visible(s, completed);
+      }
+      throw error;
+    }
   }
   visible(s: Session, sale: any) {
     if (s.roles.includes('SUPER_ADMIN') || s.permissions.includes('costs.view')) return sale;
@@ -809,11 +827,15 @@ class SalesController {
 export class PaymentMethodsController {
   constructor(private db: PrismaService) {}
   @Get() @RequirePermissions('sales.access') async list(@CurrentSession() s: Session) {
-    if (!(await this.db.paymentMethod.count({ where: { companyId: s.companyId } }))) {
-      await this.db.paymentMethod.createMany({ data: [
-        ['CASH', 'Efectivo'], ['DEBIT', 'Débito'], ['CREDIT', 'Crédito'], ['TRANSFER', 'Transferencia'], ['MERCADO_PAGO', 'Mercado Pago'], ['OTHER', 'Otro'],
-      ].map(([code, name], sortOrder) => ({ companyId: s.companyId, code, name, sortOrder, requiresReference: ['TRANSFER', 'MERCADO_PAGO', 'OTHER'].includes(code) })), skipDuplicates: true });
-    }
+    await this.db.paymentMethod.createMany({ data: [
+        ['CASH', 'Efectivo', PaymentMethodKind.CASH],
+        ['DEBIT', 'Débito', PaymentMethodKind.DEBIT],
+        ['CREDIT', 'Crédito', PaymentMethodKind.CREDIT],
+        ['TRANSFER', 'Transferencia', PaymentMethodKind.TRANSFER],
+        ['MERCADO_PAGO', 'QR / Mercado Pago', PaymentMethodKind.QR],
+        ['ACCOUNT_CURRENT', 'Cuenta corriente', PaymentMethodKind.ACCOUNT],
+        ['OTHER', 'Otro', PaymentMethodKind.OTHER],
+    ].map(([code, name, kind], sortOrder) => ({ companyId: s.companyId, code, name, kind: kind as PaymentMethodKind, sortOrder, requiresReference: ['TRANSFER', 'MERCADO_PAGO', 'ACCOUNT_CURRENT', 'OTHER'].includes(code as string) })), skipDuplicates: true });
     return this.db.paymentMethod.findMany({ where: { companyId: s.companyId }, orderBy: { sortOrder: 'asc' } });
   }
   @Post() @RequirePermissions('paymentMethods.manage') create(@CurrentSession() s: Session, @Body() d: ConfigDto) {
@@ -960,13 +982,18 @@ export class CashSessionsController {
     if (current.cashierUserId !== s.sub && !s.roles.includes('SUPER_ADMIN') && !s.permissions.includes('sales.authorizeDiscount'))
       throw new BadRequestException('No puede cerrar la caja de otro cajero');
     return this.db.$transaction(async (tx) => {
+      const cashPayments = await tx.payment.aggregate({
+        where: { sale: { cashSessionId: current.id, status: SaleStatus.COMPLETED } },
+        _sum: { cashImpact: true },
+      });
+      const expectedCash = new Prisma.Decimal(current.openingAmount).plus(cashPayments._sum.cashImpact ?? 0);
       const closed = await tx.cashSession.update({
         where: { id: current.id },
         data: { status: 'CLOSED', closingAmount: dto.closingAmount, closingNote: dto.closingNote?.trim() || null, closedAt: new Date(), closedByUserId: s.sub },
         include: { terminal: true, cashier: { select: { id: true, firstName: true, lastName: true, username: true } } },
       });
-      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: current.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: current.id, action: 'CASH_SESSION_CLOSED', metadata: { openingAmount: String(current.openingAmount), closingAmount: String(dto.closingAmount), terminalId: current.terminalId, cashierUserId: current.cashierUserId } } });
-      return closed;
+      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: current.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: current.id, action: 'CASH_SESSION_CLOSED', metadata: { openingAmount: String(current.openingAmount), cashSales: String(cashPayments._sum.cashImpact ?? 0), expectedCash: expectedCash.toString(), closingAmount: String(dto.closingAmount), difference: new Prisma.Decimal(dto.closingAmount).minus(expectedCash).toString(), terminalId: current.terminalId, cashierUserId: current.cashierUserId } } });
+      return { ...closed, cashSales: cashPayments._sum.cashImpact ?? 0, expectedCash, difference: new Prisma.Decimal(dto.closingAmount).minus(expectedCash) };
     });
   }
 }

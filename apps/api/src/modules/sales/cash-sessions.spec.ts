@@ -28,15 +28,23 @@ describe('apertura rápida de caja', () => {
   });
   it('cierra la caja, registra el importe y audita al responsable', async () => {
     const current = { id: 'session', companyId: 'company', branchId: 'branch', terminalId: 'terminal', cashierUserId: 'cashier', openingAmount: 100, terminal: {}, cashier: {} };
-    const tx = { cashSession: { update: jest.fn().mockResolvedValue({ ...current, status: 'CLOSED' }) }, auditLog: { create: jest.fn() } };
+    const tx = {
+      cashSession: { update: jest.fn().mockResolvedValue({ ...current, status: 'CLOSED' }) },
+      payment: { aggregate: jest.fn().mockResolvedValue({ _sum: { cashImpact: 25 } }) },
+      auditLog: { create: jest.fn() },
+    };
     const db = {
       branch: { findFirst: jest.fn().mockResolvedValue({ id: 'branch', name: 'Principal' }) },
       cashSession: { findFirst: jest.fn().mockResolvedValue(current) },
       $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
     };
     const controller = new CashSessionsController(db as never);
-    await expect(controller.close(base, { cashSessionId: 'session', closingAmount: 125, closingNote: 'Sin diferencias' })).resolves.toMatchObject({ status: 'CLOSED' });
+    const result = await controller.close(base, { cashSessionId: 'session', closingAmount: 125, closingNote: 'Sin diferencias' });
+    expect(result).toMatchObject({ status: 'CLOSED' });
+    expect(String(result.expectedCash)).toBe('125');
+    expect(String(result.difference)).toBe('0');
     expect(tx.cashSession.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'CLOSED', closingAmount: 125, closedByUserId: 'cashier' }) }));
     expect(tx.auditLog.create).toHaveBeenCalled();
+    expect(tx.payment.aggregate).toHaveBeenCalledWith(expect.objectContaining({ _sum: { cashImpact: true } }));
   });
 });
