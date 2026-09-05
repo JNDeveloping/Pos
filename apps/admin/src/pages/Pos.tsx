@@ -38,9 +38,11 @@ type Terminal = { id: string; name: string; code: string; branchId: string; acti
 type QuickGroup = { id: string; name: string; icon?: string; buttonSize?: string; kind?: 'GROUP' | 'CATEGORY' };
 type Cashier = { id: string; firstName: string; lastName: string; username: string };
 type CashSession = { id: string; terminalId: string; cashierUserId: string; openingAmount: string; terminal: Terminal; cashier: Cashier };
+type CashMovement = { id: string; kind: 'INCOME' | 'EXPENSE' | 'WITHDRAWAL'; amount: string; reason: string; userId: string; origin: string; createdAt: string };
+type CashSummary = { openingAmount: string; cashSales: string; movementImpact: string; expectedCash: string; movements: CashMovement[] };
 type PosAppearance = { background?: string; backgroundOpacity?: number; backgroundOverlay?: string; backgroundBlur?: number; backgroundPosition?: string };
 type Suspended = { id: string; at: string; cashier: string; branchId?: string; cart: CartLine[] };
-type Modal = 'help' | 'search' | 'edit' | 'discount' | 'quickSale' | 'suspended' | 'utilities' | 'payment' | 'closeCash' | null;
+type Modal = 'help' | 'search' | 'edit' | 'discount' | 'quickSale' | 'suspended' | 'utilities' | 'payment' | 'cashMovement' | 'closeCash' | null;
 const money = (value: number) => value.toLocaleString('es-AR', { style: 'currency', currency: 'ARS' });
 const isFractional = (line: Pick<CartLine, 'isWeighted' | 'unitType'>) => line.isWeighted || line.unitType !== 'UNIT';
 const quantity = (line: CartLine) =>
@@ -84,6 +86,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
   const [newTerminalName, setNewTerminalName] = useState('Caja 1');
   const [closingAmount, setClosingAmount] = useState('0');
   const [closingNote, setClosingNote] = useState('');
+  const [cashSummary, setCashSummary] = useState<CashSummary>();
   const [setupReady, setSetupReady] = useState(false);
   const [settings, setSettings] = useState<PosSettings>(DEFAULT_POS_SETTINGS);
   const [appearance, setAppearance] = useState<PosAppearance>({});
@@ -314,12 +317,20 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
     if (!cashSession || cart.length) return;
     setBusy(true); setMessage(undefined);
     try {
-      await api('/cash-sessions/close', { method: 'POST', body: JSON.stringify({ cashSessionId: cashSession.id, closingAmount: Number(closingAmount || 0), closingNote: closingNote || undefined }) });
+      const result = await api<{ expectedCash: string; difference: string }>('/cash-sessions/close', { method: 'POST', body: JSON.stringify({ cashSessionId: cashSession.id, closingAmount: Number(closingAmount || 0), closingNote: closingNote || undefined }) });
       setCashSession(undefined); setModal(null); setClosingAmount('0'); setClosingNote('');
-      setMessage({ kind: 'ok', text: 'Caja cerrada correctamente. Podés abrir una nueva caja cuando la necesites.' });
+      setMessage({ kind: 'ok', text: `Caja cerrada · esperado ${money(Number(result.expectedCash))} · diferencia ${money(Number(result.difference))}` });
     } catch (error) { setMessage({ kind: 'error', text: (error as Error).message }); }
     finally { setBusy(false); }
   };
+  const loadCashSummary = useCallback(async () => {
+    if (!cashSession) return;
+    try { setCashSummary(await api<CashSummary>(`/cash-sessions/${cashSession.id}/summary`)); }
+    catch (error) { setMessage({ kind: 'error', text: (error as Error).message }); }
+  }, [cashSession]);
+  useEffect(() => {
+    if (modal === 'closeCash' || modal === 'cashMovement') void loadCashSummary();
+  }, [loadCashSummary, modal]);
 
   const removeSelected = useCallback(() => {
     if (!selectedId) return;
@@ -437,7 +448,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
           <span className={cashSession ? 'open' : ''} />
           <div><b>{cashSession ? 'Caja abierta' : 'Caja sin abrir'}</b><small>
             {branch?.name ?? 'Sin sucursal'} ·{' '}
-            {terminals.find((item) => item.id === terminalId)?.name ?? 'Sin terminal'}
+            {terminals.find((item) => item.id === terminalId)?.name ?? 'Elegí una terminal para abrir'}
           </small></div>
         </div>
         <div className="pos-head-meta">
@@ -454,6 +465,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
             <Expand size={18} />
           </button>
           {cashSession && hasPermission(me, 'cashSessions.close') && <button className="pos-close-cash" title="Cerrar caja" onClick={() => { if (cart.length) setMessage({ kind: 'error', text: 'Terminá o cancelá la venta antes de cerrar la caja.' }); else setModal('closeCash'); }}><Power size={18}/><span>CERRAR CAJA</span></button>}
+          {cashSession && hasPermission(me, 'cashSessions.movements.view') && <button className="pos-close-cash" title="Ingresos, gastos y retiros" onClick={() => setModal('cashMovement')}><Banknote size={18}/><span>MOVIMIENTOS</span></button>}
           {canOpenAdmin && (
             <a className="pos-admin-link" href={appPath('/admin')} title="Abrir centro de administración">
               <LayoutDashboard size={18} /> <span>ADMIN</span>
@@ -830,7 +842,8 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
           }}
         />
       )}
-      {modal === 'closeCash' && cashSession && <ModalFrame title="Dar de baja y cerrar caja" close={() => setModal(null)}><div className="pos-form"><div className="cash-close-summary"><span>Terminal<b>{cashSession.terminal.name}</b></span><span>Fondo inicial<b>{money(Number(cashSession.openingAmount))}</b></span></div><label>Efectivo contado al cierre<input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={closingAmount} onChange={(event) => setClosingAmount(event.target.value)}/></label><label>Observación opcional<textarea value={closingNote} onChange={(event) => setClosingNote(event.target.value)} placeholder="Diferencias, retiro, observaciones…"/></label><p className="pos-feedback info">Esta acción deja la caja cerrada y registra el responsable en Auditoría.</p><button className="pos-close-confirm" disabled={busy || cart.length > 0 || Number(closingAmount) < 0} onClick={() => void closeCash()}>{busy ? 'Cerrando…' : 'Confirmar cierre de caja'}</button></div></ModalFrame>}
+      {modal === 'cashMovement' && cashSession && <CashMovementModal summary={cashSummary} canCreate={hasPermission(me, 'cashSessions.movements.create')} close={() => { setModal(null); focusScanner(); }} save={async (kind, amount, reason) => { await api(`/cash-sessions/${cashSession.id}/movements`, { method: 'POST', body: JSON.stringify({ kind, amount, reason }) }); await loadCashSummary(); }} />}
+      {modal === 'closeCash' && cashSession && <ModalFrame title="Arqueo y cierre de caja" close={() => setModal(null)}><div className="pos-form"><div className="cash-close-summary"><span>Fondo inicial<b>{money(Number(cashSummary?.openingAmount ?? cashSession.openingAmount))}</b></span><span>Ventas en efectivo<b>{money(Number(cashSummary?.cashSales ?? 0))}</b></span><span>Movimientos manuales<b>{money(Number(cashSummary?.movementImpact ?? 0))}</b></span><span>Efectivo esperado<b>{money(Number(cashSummary?.expectedCash ?? cashSession.openingAmount))}</b></span></div><label>Efectivo contado al cierre<input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={closingAmount} onChange={(event) => setClosingAmount(event.target.value)}/></label><div className="payment-change"><span>DIFERENCIA</span><b>{money(Number(closingAmount || 0) - Number(cashSummary?.expectedCash ?? cashSession.openingAmount))}</b></div><label>Observación opcional<textarea value={closingNote} onChange={(event) => setClosingNote(event.target.value)} placeholder="Diferencias y observaciones…"/></label><p className="pos-feedback info">El arqueo, horario y responsable quedarán registrados en Auditoría.</p><button className="pos-close-confirm" disabled={busy || !cashSummary || cart.length > 0 || Number(closingAmount) < 0} onClick={() => void closeCash()}>{busy ? 'Cerrando…' : 'Confirmar cierre de caja'}</button></div></ModalFrame>}
     </div>
   );
 }
@@ -849,6 +862,14 @@ function ModalFrame({ title, close, children }: { title: string; close: () => vo
       </div>
     </div>
   );
+}
+function CashMovementModal({ summary, canCreate, close, save }: { summary?: CashSummary; canCreate: boolean; close: () => void; save: (kind: CashMovement['kind'], amount: number, reason: string) => Promise<void> }) {
+  const [kind, setKind] = useState<CashMovement['kind']>('INCOME');
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const labels = { INCOME: 'Ingreso', EXPENSE: 'Gasto', WITHDRAWAL: 'Retiro' };
+  return <ModalFrame title="Movimientos de caja" close={close}><div className="pos-form"><div className="cash-close-summary"><span>Efectivo esperado<b>{money(Number(summary?.expectedCash ?? 0))}</b></span><span>Movimientos<b>{summary?.movements.length ?? 0}</b></span></div>{canCreate && <form className="pos-form" onSubmit={async (event) => { event.preventDefault(); setSaving(true); try { await save(kind, Number(amount), reason); setAmount(''); setReason(''); } finally { setSaving(false); } }}><label>Tipo<select value={kind} onChange={(event) => setKind(event.target.value as CashMovement['kind'])}><option value="INCOME">Ingreso de efectivo</option><option value="EXPENSE">Gasto</option><option value="WITHDRAWAL">Retiro</option></select></label><label>Importe<input type="number" inputMode="decimal" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></label><label>Motivo<input minLength={3} maxLength={200} value={reason} onChange={(event) => setReason(event.target.value)} /></label><button className="pos-pay" disabled={saving || Number(amount) <= 0 || reason.trim().length < 3}>{saving ? 'REGISTRANDO…' : 'REGISTRAR MOVIMIENTO'}</button></form>}<div className="pos-results">{summary?.movements.map((movement) => <div className="rounded-xl border p-3" key={movement.id}><b>{labels[movement.kind]} · {money(Number(movement.amount))}</b><small className="block">{movement.reason} · {new Date(movement.createdAt).toLocaleString('es-AR')} · origen {movement.origin}</small></div>)}{summary && !summary.movements.length && <p className="pos-feedback info">No hay movimientos manuales en esta sesión.</p>}</div></div></ModalFrame>;
 }
 function SearchModal({
   results,

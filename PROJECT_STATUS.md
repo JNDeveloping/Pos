@@ -19,8 +19,8 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 - `apps/api`: NestJS 11, guard JWT/RBAC global, Prisma 6, PostgreSQL y Redis tolerante a fallos.
 - API pública esperada en `/pos/api`; Nest usa `/api` y escucha internamente en `127.0.0.1:3002`.
 - La PWA sólo precachea shell/assets. No hay IndexedDB, caché de respuestas API ni fuente comercial offline.
-- Existen 20 migraciones inmutables. La última, `20260905170000_payment_method_nature`, clasifica la naturaleza de cada
-  medio y registra el impacto efectivo de cada pago sin alterar históricos.
+- Existen 21 migraciones inmutables. La última, `20260905200000_cash_movements_and_open_guard`, agrega movimientos manuales
+  y garantiza en PostgreSQL una sola sesión abierta por terminal.
 - `packages/shared` sigue reservado; los contratos frontend/backend continúan duplicados localmente.
 
 ## Mapa de datos y relaciones principales
@@ -100,8 +100,8 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 - **Proveedores:** ficha y relaciones funcionan; cuenta corriente no existe y permanece fuera del alcance aprobado.
 - **Etiquetas:** Fleje, Cartel FyV y A5 Liqui imprimen con composición física; falta calibración por impresora y marcar como
   impresa sigue siendo una acción separada del diálogo del navegador.
-- **Terminales:** esquema, CRUD y apertura rápida existen. `posConfig` se persiste pero no tiene editor específico; la UI
-  genera `CAJA-${terminalesActivas + 1}`, que puede chocar con el índice único si hay terminales inactivas.
+- **Terminales:** esquema, alta, edición, activación/desactivación y apertura rápida existen. `posConfig` se persiste pero
+  todavía no tiene editor específico; el código rápido aún puede chocar si existe una terminal inactiva con ese código.
 - **Medios de pago:** existen y se autoinicializan. El endpoint de lectura requiere `sales.access`; Configuración lo llama
   sin ocultar la sección por ese permiso, por lo que ciertos roles con `branches.settings` pueden recibir 403.
 - **Suspendidos:** funcionan sólo en el dispositivo. No hay modelo/API, concurrencia, recuperación multi-terminal ni
@@ -114,7 +114,7 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 - Promociones temporales/2x1/3x2/segunda unidad y liquidaciones como regla comercial persistida.
 - Compras recomendadas, FEFO, OCR/LLM productivo, cuenta corriente de proveedor y hardware fiscal.
 - Suite HTTP/e2e con PostgreSQL, pruebas de migración y pruebas de concurrencia de venta/stock/caja.
-- Impresión nativa directa, arqueo contable y retiros de caja.
+- Impresión nativa directa y mayor contable general; el arqueo operativo y los movimientos manuales de caja ya existen.
 
 ## Errores y comportamientos problemáticos detectados
 
@@ -179,8 +179,8 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 
 ## Verificaciones de esta auditoría
 
-- Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 20 SQL.
-- Se ejecutan como controles locales: lint, typecheck, 24 tests frontend, 54 tests backend, build y `check:release`.
+- Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 21 SQL.
+- Se ejecutan como controles locales: lint, typecheck, 24 tests frontend, 55 tests backend, build y `check:release`.
 - PostgreSQL/Redis HTTP/e2e quedan **no ejecutados** por falta de servicios/credenciales en el entorno de auditoría.
 
 ## Estabilización de arquitectura — 2026-09-05
@@ -236,9 +236,24 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
   `20260905170000_payment_method_nature` es aditiva, pero requiere deploy y `permissions:sync` antes de habilitar cuenta
   corriente a roles autorizados.
 
+## Cajas y terminales — 2026-09-05
+
+- Terminal física pertenece a empresa/sucursal y admite nombre, código único, estado, impresora y configuración POS. La
+  pantalla de Configuración permite crear, editar y activar/desactivar; una terminal con sesión abierta no se desactiva.
+- Sin caja abierta, el POS ofrece sucursal autorizada, cajero, terminal y fondo inicial. Si no hay terminal, un usuario con
+  `terminals.manage` puede crearla desde la misma apertura sin abandonar el flujo.
+- La migración `20260905200000_cash_movements_and_open_guard` agrega un índice único parcial para que PostgreSQL impida dos
+  sesiones `OPEN` de la misma terminal, incluso ante aperturas concurrentes.
+- `CashMovement` registra ingreso, gasto o retiro con importe, motivo, usuario, fecha, sucursal, sesión y origen. Crear y
+  consultar movimientos requieren `cashSessions.movements.create/view` y cada alta genera auditoría en la transacción.
+- El esperado se calcula como fondo inicial + ventas completadas en efectivo + ingresos − gastos − retiros. El cierre
+  muestra esperado, contado y diferencia antes de confirmar, y conserva esos valores en Auditoría.
+- No se modificó el dominio de pagos ni stock en esta etapa. La migración es aditiva, pero el índice fallará deliberadamente
+  si una base ya contiene dos sesiones abiertas para una misma terminal; esos datos deben auditarse antes del deploy.
+
 ## Orden de trabajo recomendado (sin implementarlo ahora)
 
-1. Levantar PostgreSQL efímero, aplicar las 20 migraciones y crear smoke tests HTTP multi-tenant.
+1. Levantar PostgreSQL efímero, aplicar las 21 migraciones y crear smoke tests HTTP multi-tenant.
 2. Probar en orden: login → sucursal → terminal → caja → catálogo → pago mixto → venta → stock → ticket → anulación.
 3. Corregir permisos/errores de Configuración POS y la generación robusta de códigos de terminal.
 4. Desacoplar las cargas del bootstrap POS para tolerar fallos parciales.
@@ -248,8 +263,8 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 
 ## Decisiones vigentes
 
-- La estabilización y el POS modificaron frontend, backend y migraciones aditivas; cuenta corriente agregó el permiso
-  `sales.accountCredit`, que debe asignarse sólo a roles expresamente autorizados.
+- La estabilización y el POS modificaron frontend, backend y migraciones aditivas; los permisos nuevos
+  `sales.accountCredit` y `cashSessions.movements.view/create` deben asignarse sólo a roles expresamente autorizados.
 - PostgreSQL/API central siguen siendo la autoridad comercial y el navegador no será fuente de verdad.
 - Conservar transacciones, snapshots, soft delete, idempotencia, tenant/sucursal, redirects compatibles y bypass de
   `SUPER_ADMIN`.

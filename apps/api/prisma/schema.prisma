@@ -457,6 +457,12 @@ enum CashSessionStatus {
   CLOSED
 }
 
+enum CashMovementKind {
+  INCOME
+  EXPENSE
+  WITHDRAWAL
+}
+
 model Terminal {
   id             String   @id @default(uuid()) @db.Uuid
   companyId      String   @db.Uuid
@@ -493,10 +499,28 @@ model CashSession {
   cashier        User              @relation("CashierSessions", fields: [cashierUserId], references: [id])
   closedBy       User?             @relation("ClosedCashSessions", fields: [closedByUserId], references: [id])
   sales          Sale[]
+  movements      CashMovement[]
 
   @@index([companyId, branchId, status])
   @@index([terminalId, status])
   @@index([cashierUserId, status])
+}
+
+model CashMovement {
+  id            String           @id @default(uuid()) @db.Uuid
+  companyId     String           @db.Uuid
+  branchId      String           @db.Uuid
+  cashSessionId String           @db.Uuid
+  cashSession   CashSession      @relation(fields: [cashSessionId], references: [id], onDelete: Restrict)
+  kind          CashMovementKind
+  amount        Decimal          @db.Decimal(14, 2)
+  reason        String
+  userId        String           @db.Uuid
+  origin        String           @default("POS")
+  createdAt     DateTime         @default(now())
+
+  @@index([cashSessionId, createdAt])
+  @@index([companyId, branchId, createdAt])
 }
 
 model PosQuickGroup {

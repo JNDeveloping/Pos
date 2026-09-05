@@ -12,7 +12,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { PaymentMethodKind, Prisma, SaleStatus, StockMovementType } from '@prisma/client';
+import { CashMovementKind, PaymentMethodKind, Prisma, SaleStatus, StockMovementType } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsArray,
@@ -99,6 +99,11 @@ class CloseCashSessionDto {
   @IsUUID() cashSessionId!: string;
   @IsNumber() @Min(0) closingAmount!: number;
   @IsOptional() @IsString() closingNote?: string;
+}
+class CashMovementDto {
+  @IsEnum(CashMovementKind) kind!: CashMovementKind;
+  @IsNumber() @Min(0.01) amount!: number;
+  @IsString() @MinLength(3) @MaxLength(200) reason!: string;
 }
 class QuickGroupDto {
   @IsUUID() branchId!: string;
@@ -867,7 +872,13 @@ class TerminalsController {
     @Param('id') id: string,
     @Body() d: TerminalDto,
   ) {
-    return this.ownedBranch(s, d.branchId).then(() => this.db.terminal.updateMany({ where: { id, companyId: s.companyId }, data: { ...d, posConfig: d.posConfig as Prisma.InputJsonValue | undefined, code: d.code.trim().toUpperCase() } }));
+    return this.ownedBranch(s, d.branchId).then(async () => {
+      const terminal = await this.db.terminal.findFirst({ where: { id, companyId: s.companyId } });
+      if (!terminal) throw new NotFoundException('Terminal no encontrada');
+      if (d.active === false && await this.db.cashSession.count({ where: { terminalId: id, status: 'OPEN' } }))
+        throw new BadRequestException('No se puede desactivar una terminal con caja abierta');
+      return this.db.terminal.update({ where: { id }, data: { ...d, posConfig: d.posConfig as Prisma.InputJsonValue | undefined, code: d.code.trim().toUpperCase() } });
+    });
   }
   private async ownedBranch(s: Session, branchId: string) {
     if (s.branchId && s.branchId !== branchId) throw new BadRequestException('Sucursal inválida');
@@ -937,6 +948,70 @@ export class CashSessionsController {
     if (current) await this.branch(s, current.branchId);
     return current;
   }
+  private async openSession(s: Session, id: string) {
+    const session = await this.db.cashSession.findFirst({
+      where: { id, companyId: s.companyId, status: 'OPEN' },
+      include: { terminal: true, cashier: { select: { id: true, firstName: true, lastName: true, username: true } } },
+    });
+    if (!session) throw new NotFoundException('La caja ya está cerrada o no existe');
+    await this.branch(s, session.branchId);
+    return session;
+  }
+  private async summaryData(client: PrismaService | Prisma.TransactionClient, session: { id: string; openingAmount: Prisma.Decimal }) {
+    const [cashPayments, movements] = await Promise.all([
+      client.payment.aggregate({
+        where: { sale: { cashSessionId: session.id, status: SaleStatus.COMPLETED } },
+        _sum: { cashImpact: true },
+      }),
+      client.cashMovement.findMany({ where: { cashSessionId: session.id }, orderBy: { createdAt: 'desc' } }),
+    ]);
+    const movementImpact = movements.reduce(
+      (sum, movement) => sum.plus(movement.kind === CashMovementKind.INCOME ? movement.amount : movement.amount.neg()),
+      new Prisma.Decimal(0),
+    );
+    const cashSales = cashPayments._sum.cashImpact ?? new Prisma.Decimal(0);
+    return { cashSales, movementImpact, movements, expectedCash: new Prisma.Decimal(session.openingAmount).plus(cashSales).plus(movementImpact) };
+  }
+  @Get(':id/summary') @RequirePermissions('cashSessions.movements.view') async summary(
+    @CurrentSession() s: Session,
+    @Param('id') id: string,
+  ) {
+    const session = await this.openSession(s, id);
+    return { ...await this.summaryData(this.db, session), openingAmount: session.openingAmount };
+  }
+  @Post(':id/movements') @RequirePermissions('cashSessions.movements.create') async movement(
+    @CurrentSession() s: Session,
+    @Param('id') id: string,
+    @Body() dto: CashMovementDto,
+  ) {
+    const session = await this.openSession(s, id);
+    return this.db.$transaction(async (tx) => {
+      const movement = await tx.cashMovement.create({
+        data: {
+          companyId: s.companyId,
+          branchId: session.branchId,
+          cashSessionId: session.id,
+          kind: dto.kind,
+          amount: dto.amount,
+          reason: dto.reason.trim(),
+          userId: s.sub,
+          origin: 'POS',
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          companyId: s.companyId,
+          branchId: session.branchId,
+          userId: s.sub,
+          entityType: 'CASH_MOVEMENT',
+          entityId: movement.id,
+          action: `CASH_${dto.kind}`,
+          metadata: { cashSessionId: session.id, amount: String(dto.amount), reason: dto.reason.trim(), origin: 'POS' },
+        },
+      });
+      return movement;
+    });
+  }
   @Post('open') @RequirePermissions('cashSessions.open') async open(
     @CurrentSession() s: Session,
     @Body() dto: OpenCashSessionDto,
@@ -960,40 +1035,38 @@ export class CashSessionsController {
       throw new BadRequestException('Terminal o cajero inválido');
     const existing = await this.db.cashSession.findFirst({ where: { terminalId: terminal.id, status: 'OPEN' } });
     if (existing) throw new BadRequestException('La terminal ya tiene una caja abierta');
-    return this.db.$transaction(async (tx) => {
-      const opened = await tx.cashSession.create({
+    try {
+      return await this.db.$transaction(async (tx) => {
+        const opened = await tx.cashSession.create({
         data: { companyId: s.companyId, branchId: dto.branchId, terminalId: terminal.id, cashierUserId: dto.cashierUserId, openedByUserId: s.sub, openingAmount: dto.openingAmount },
         include: { cashier: { select: { id: true, firstName: true, lastName: true, username: true } }, terminal: true },
       });
-      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: dto.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: opened.id, action: 'CASH_SESSION_OPENED', metadata: { openingAmount: String(dto.openingAmount), terminalId: terminal.id, cashierUserId: dto.cashierUserId } } });
-      return opened;
-    });
+        await tx.auditLog.create({ data: { companyId: s.companyId, branchId: dto.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: opened.id, action: 'CASH_SESSION_OPENED', metadata: { openingAmount: String(dto.openingAmount), terminalId: terminal.id, cashierUserId: dto.cashierUserId } } });
+        return opened;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+        throw new BadRequestException('La terminal ya tiene una caja abierta');
+      throw error;
+    }
   }
   @Post('close') @RequirePermissions('cashSessions.close') async close(
     @CurrentSession() s: Session,
     @Body() dto: CloseCashSessionDto,
   ) {
-    const current = await this.db.cashSession.findFirst({
-      where: { id: dto.cashSessionId, companyId: s.companyId, status: 'OPEN' },
-      include: { terminal: true, cashier: { select: { id: true, firstName: true, lastName: true, username: true } } },
-    });
-    if (!current) throw new NotFoundException('La caja ya está cerrada o no existe');
-    await this.branch(s, current.branchId);
+    const current = await this.openSession(s, dto.cashSessionId);
     if (current.cashierUserId !== s.sub && !s.roles.includes('SUPER_ADMIN') && !s.permissions.includes('sales.authorizeDiscount'))
       throw new BadRequestException('No puede cerrar la caja de otro cajero');
     return this.db.$transaction(async (tx) => {
-      const cashPayments = await tx.payment.aggregate({
-        where: { sale: { cashSessionId: current.id, status: SaleStatus.COMPLETED } },
-        _sum: { cashImpact: true },
-      });
-      const expectedCash = new Prisma.Decimal(current.openingAmount).plus(cashPayments._sum.cashImpact ?? 0);
+      const summary = await this.summaryData(tx, current);
+      const expectedCash = summary.expectedCash;
       const closed = await tx.cashSession.update({
         where: { id: current.id },
         data: { status: 'CLOSED', closingAmount: dto.closingAmount, closingNote: dto.closingNote?.trim() || null, closedAt: new Date(), closedByUserId: s.sub },
         include: { terminal: true, cashier: { select: { id: true, firstName: true, lastName: true, username: true } } },
       });
-      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: current.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: current.id, action: 'CASH_SESSION_CLOSED', metadata: { openingAmount: String(current.openingAmount), cashSales: String(cashPayments._sum.cashImpact ?? 0), expectedCash: expectedCash.toString(), closingAmount: String(dto.closingAmount), difference: new Prisma.Decimal(dto.closingAmount).minus(expectedCash).toString(), terminalId: current.terminalId, cashierUserId: current.cashierUserId } } });
-      return { ...closed, cashSales: cashPayments._sum.cashImpact ?? 0, expectedCash, difference: new Prisma.Decimal(dto.closingAmount).minus(expectedCash) };
+      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: current.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: current.id, action: 'CASH_SESSION_CLOSED', metadata: { openingAmount: String(current.openingAmount), cashSales: String(summary.cashSales), manualMovements: summary.movementImpact.toString(), expectedCash: expectedCash.toString(), closingAmount: String(dto.closingAmount), difference: new Prisma.Decimal(dto.closingAmount).minus(expectedCash).toString(), terminalId: current.terminalId, cashierUserId: current.cashierUserId } } });
+      return { ...closed, cashSales: summary.cashSales, movementImpact: summary.movementImpact, expectedCash, difference: new Prisma.Decimal(dto.closingAmount).minus(expectedCash) };
     });
   }
 }

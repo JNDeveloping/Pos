@@ -112,6 +112,8 @@ const modules: Record<string, string[]> = {
     'sales.access|Acceder al POS',
     'cashSessions.open|Dar de alta / abrir caja',
     'cashSessions.close|Dar de baja / cerrar caja',
+    'cashSessions.movements.view|Ver movimientos de caja',
+    'cashSessions.movements.create|Registrar ingresos, gastos y retiros',
     'sales.view|Ver ventas',
     'sales.create|Crear ventas',
     'sales.cancel|Anular ventas',
