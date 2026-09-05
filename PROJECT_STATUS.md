@@ -19,8 +19,8 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 - `apps/api`: NestJS 11, guard JWT/RBAC global, Prisma 6, PostgreSQL y Redis tolerante a fallos.
 - API pública esperada en `/pos/api`; Nest usa `/api` y escucha internamente en `127.0.0.1:3002`.
 - La PWA sólo precachea shell/assets. No hay IndexedDB, caché de respuestas API ni fuente comercial offline.
-- Existen 18 migraciones inmutables. La última, `20260904170000_pos_terminal_and_line_notes`, agrega impresora/configuración
-  por terminal y nota de línea de venta.
+- Existen 19 migraciones inmutables. La última, `20260905130000_pos_quick_sale_lines`, permite líneas rápidas sin producto
+  manteniendo snapshots contables y sin generar movimientos de stock ficticios.
 - `packages/shared` sigue reservado; los contratos frontend/backend continúan duplicados localmente.
 
 ## Mapa de datos y relaciones principales
@@ -179,8 +179,8 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 
 ## Verificaciones de esta auditoría
 
-- Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 18 SQL.
-- Se ejecutan como controles locales: lint, typecheck, 22 tests frontend, 52 tests backend, build y `check:release`.
+- Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 19 SQL.
+- Se ejecutan como controles locales: lint, typecheck, 24 tests frontend, 53 tests backend, build y `check:release`.
 - PostgreSQL/Redis HTTP/e2e quedan **no ejecutados** por falta de servicios/credenciales en el entorno de auditoría.
 
 ## Estabilización de arquitectura — 2026-09-05
@@ -197,23 +197,41 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
   exponen mensaje, estado HTTP y código sin transformar una caída de red en cierre de sesión.
 - El filtro global backend registra método, ruta, usuario, estado y código; sólo incluye stack en errores 5xx y nunca
   registra headers, tokens, body ni credenciales.
-- No hubo cambios Prisma, migraciones, permisos ni reglas comerciales. Sigue pendiente cancelar búsquedas particulares,
-  desacoplar el bootstrap POS y validar múltiples pestañas mediante una prueba e2e en navegador real.
+- No hubo cambios de permisos. Sigue pendiente desacoplar el bootstrap POS y validar múltiples pestañas mediante una prueba
+  e2e en navegador real.
+
+## Reestructuración operativa del POS — 2026-09-05
+
+- El scanner vacía el campo al presionar Enter antes de consultar y agrega mediante actualización funcional del carrito;
+  esto evita concatenar códigos o perder incrementos cuando llegan lecturas consecutivas.
+- La búsqueda textual espera 220 ms, cancela la consulta anterior y mantiene el límite backend de 30 resultados. Busca
+  nombre, nombre corto, código interno, SKU, marca, barcode y códigos/descripciones/aliases de proveedor. Un número no
+  encontrado como barcode vuelve a buscarse como código interno o alternativo.
+- Unidad suma enteros; KG, gramos, litros y metros admiten hasta tres decimales. Pesables siguen solicitando peso y los
+  productos con precio abierto sólo permiten edición si producto, sucursal y permiso lo autorizan.
+- Cantidad, precio autorizado, descuento autorizado, nota y eliminación permanecen en la línea y el total se deriva
+  inmediatamente del carrito. Las suspendidas guardan el snapshot completo y ahora quedan filtradas por sucursal.
+- Los accesos configurados siguen siendo la autoridad. Sin configuración, las categorías Frutas/Verduras, Panadería,
+  Fiambres y Leña/Carbón se priorizan cuando existen y el resto continúa disponible hasta el límite táctil.
+- Venta rápida requiere `sales.manualPrice`, descripción, precio y cantidad. Se persiste transaccionalmente como
+  `SaleItem` sin producto/BranchProduct, costo e impuesto cero, se audita y no modifica stock. Anulación/devolución tampoco
+  inventan movimientos físicos para esas líneas.
+- La migración nueva sólo vuelve opcionales tres referencias escalares históricas; no elimina tablas ni datos. Antes de
+  producción debe aplicarse y probarse sobre PostgreSQL con venta, anulación y devolución rápida.
 
 ## Orden de trabajo recomendado (sin implementarlo ahora)
 
-1. Levantar PostgreSQL efímero, aplicar las 18 migraciones y crear smoke tests HTTP multi-tenant.
+1. Levantar PostgreSQL efímero, aplicar las 19 migraciones y crear smoke tests HTTP multi-tenant.
 2. Probar en orden: login → sucursal → terminal → caja → catálogo → pago mixto → venta → stock → ticket → anulación.
 3. Corregir permisos/errores de Configuración POS y la generación robusta de códigos de terminal.
-4. Cancelar búsquedas anteriores y desacoplar las cargas del bootstrap POS para tolerar fallos parciales.
+4. Desacoplar las cargas del bootstrap POS para tolerar fallos parciales.
 5. Consolidar settings POS en servidor y retirar sólo la ruta/helper local cuando ya no tenga consumidores.
 6. Corregir zona horaria de reportes y búsqueda paginada de compras.
 7. Completar luego las superficies ya existentes (familias, vencimientos, stock desktop), sin abrir módulos duplicados.
 
 ## Decisiones vigentes
 
-- La estabilización modificó infraestructura transversal del frontend y logging backend, sin cambiar reglas comerciales,
-  esquema, migraciones ni permisos.
+- La estabilización y el POS modificaron frontend, backend y una migración aditiva; no cambiaron el catálogo de permisos.
 - PostgreSQL/API central siguen siendo la autoridad comercial y el navegador no será fuente de verdad.
 - Conservar transacciones, snapshots, soft delete, idempotencia, tenant/sucursal, redirects compatibles y bypass de
   `SUPER_ADMIN`.

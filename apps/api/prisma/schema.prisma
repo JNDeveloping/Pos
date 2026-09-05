@@ -572,8 +572,8 @@ model SaleItem {
   id                  String           @id @default(uuid()) @db.Uuid
   saleId              String           @db.Uuid
   sale                Sale             @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productId           String           @db.Uuid
-  branchProductId     String           @db.Uuid
+  productId           String?          @db.Uuid
+  branchProductId     String?          @db.Uuid
   productNameSnapshot String
   barcodeSnapshot     String?
   quantity            Decimal          @db.Decimal(14, 3)
@@ -629,7 +629,7 @@ model SaleReturnItem {
   saleReturn    SaleReturn @relation(fields: [saleReturnId], references: [id], onDelete: Cascade)
   saleItemId    String     @db.Uuid
   saleItem      SaleItem   @relation(fields: [saleItemId], references: [id])
-  productId     String     @db.Uuid
+  productId     String?    @db.Uuid
   quantity      Decimal    @db.Decimal(14, 3)
   unitPrice     Decimal    @db.Decimal(14, 2)
   amount        Decimal    @db.Decimal(14, 2)

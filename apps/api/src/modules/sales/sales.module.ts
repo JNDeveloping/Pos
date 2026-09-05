@@ -33,7 +33,8 @@ import { PrismaService } from '../../prisma.service';
 import { StockModule, StockService } from '../stock/stock.module';
 
 class SaleLineDto {
-  @IsUUID() productId!: string;
+  @IsOptional() @IsUUID() productId?: string;
+  @IsOptional() @IsString() @MaxLength(120) description?: string;
   @IsNumber() @Min(0.001) quantity!: number;
   @IsOptional() @IsNumber() @Min(0) discountPercent?: number;
   @IsOptional() @IsNumber() @Min(0) discountAmount?: number;
@@ -152,7 +153,8 @@ class SalesService {
       return this.visible(s, previous);
     }
     if (!dto.items.length) throw new BadRequestException('La venta no tiene productos');
-    if (new Set(dto.items.map((item) => item.productId)).size !== dto.items.length)
+    const registeredIds = dto.items.flatMap((item) => item.productId ? [item.productId] : []);
+    if (new Set(registeredIds).size !== registeredIds.length)
       throw new BadRequestException('Un producto no puede repetirse en varias líneas');
     return this.db.$transaction(
       async (tx) => {
@@ -176,6 +178,22 @@ class SalesService {
         if (branch.requireCashOpen && !cashSession) throw new BadRequestException('Debe abrir la caja antes de vender');
         const lines = [];
         for (const input of dto.items) {
+          if (!input.productId) {
+            if (!sessionCan(s, 'sales.manualPrice')) throw new BadRequestException('No tiene permiso para venta rápida');
+            const name = input.description?.trim();
+            if (!name) throw new BadRequestException('La venta rápida requiere una descripción');
+            if (!(input.manualPrice && input.manualPrice > 0))
+              throw new BadRequestException('La venta rápida requiere un precio mayor que cero');
+            const price = new Prisma.Decimal(input.manualPrice);
+            const pct = new Prisma.Decimal(input.discountPercent ?? 0);
+            const amount = new Prisma.Decimal(input.discountAmount ?? 0);
+            if ((pct.gt(0) || amount.gt(0)) && !sessionCan(s, 'sales.discountItem'))
+              throw new BadRequestException('No tiene permiso para descuento por ítem');
+            const subtotal = price.mul(input.quantity).mul(new Prisma.Decimal(1).minus(pct.div(100))).minus(amount);
+            if (subtotal.lt(0)) throw new BadRequestException('Descuento inválido');
+            lines.push({ input, config: null, price, originalPrice: price, pct, amount, subtotal, quickName: name });
+            continue;
+          }
           const { config, price: resolved } = await this.prices.resolve(
             tx,
             s,
@@ -204,7 +222,7 @@ class SalesService {
           const gross = price.mul(input.quantity),
             subtotal = gross.mul(new Prisma.Decimal(1).minus(pct.div(100))).minus(amount);
           if (subtotal.lt(0)) throw new BadRequestException('Descuento inválido');
-          lines.push({ input, config, price, originalPrice: resolved, pct, amount, subtotal });
+          lines.push({ input, config, price, originalPrice: resolved, pct, amount, subtotal, quickName: undefined });
         }
         const subtotal = lines.reduce((sum, l) => sum.plus(l.subtotal), new Prisma.Decimal(0));
         const salePct = new Prisma.Decimal(dto.discountPercent ?? 0);
@@ -238,7 +256,7 @@ class SalesService {
         });
         const saleNumber = `${branch.code}-${terminal.code}-${String(numbered.nextSaleNumber).padStart(8, '0')}`;
         const costTotal = lines.reduce(
-          (sum, l) => sum.plus(l.config.cost.mul(l.input.quantity)),
+          (sum, l) => sum.plus(l.config ? l.config.cost.mul(l.input.quantity) : 0),
           new Prisma.Decimal(0),
         );
         const sale = await tx.sale.create({
@@ -261,17 +279,17 @@ class SalesService {
             items: {
               create: lines.map((l) => ({
                 productId: l.input.productId,
-                branchProductId: l.config.id,
-                productNameSnapshot: l.config.product.name,
-                barcodeSnapshot: l.config.product.barcodes.find((b) => b.isPrimary)?.barcode,
+                branchProductId: l.config?.id,
+                productNameSnapshot: l.config?.product.name ?? l.quickName ?? 'Venta rápida',
+                barcodeSnapshot: l.config?.product.barcodes.find((b) => b.isPrimary)?.barcode,
                 quantity: l.input.quantity,
                 unitPrice: l.price,
                 originalUnitPrice: l.originalPrice,
-                costSnapshot: l.config.cost,
+                costSnapshot: l.config?.cost ?? 0,
                 discountPercent: l.pct,
                 discountAmount: l.amount,
                 subtotal: l.subtotal,
-                taxRateSnapshot: l.config.product.taxRate,
+                taxRateSnapshot: l.config?.product.taxRate ?? 0,
                 note: l.input.note?.trim() || undefined,
               })),
             },
@@ -292,7 +310,7 @@ class SalesService {
           include: { items: true, payments: { include: { paymentMethod: true } } },
         });
         for (const l of lines)
-          await this.stock.change(
+          if (l.input.productId) await this.stock.change(
             tx,
             s,
             dto.branchId,
@@ -334,7 +352,7 @@ class SalesService {
               userId: s.sub,
               entityType: 'SALE',
               entityId: sale.id,
-              action: 'SALE_MANUAL_PRICE',
+            action: lines.some((line) => !line.input.productId) ? 'SALE_QUICK_LINE' : 'SALE_MANUAL_PRICE',
             },
           });
         return this.visible(s, sale);
@@ -372,7 +390,7 @@ class SalesService {
         });
         if (!sale) throw new BadRequestException('Venta no anulable');
         for (const item of sale.items)
-          await this.stock.change(
+          if (item.productId) await this.stock.change(
             tx,
             s,
             sale.branchId,
@@ -445,14 +463,14 @@ class SalesService {
                 quantity: x.input.quantity,
                 unitPrice: x.item.unitPrice,
                 amount: x.amount,
-                returnToStock: x.input.returnToStock ?? true,
+                returnToStock: Boolean(x.item.productId) && (x.input.returnToStock ?? true),
               })),
             },
           },
           include: { items: true },
         });
         for (const x of data)
-          if (x.input.returnToStock ?? true)
+          if (x.item.productId && (x.input.returnToStock ?? true))
             await this.stock.change(
               tx,
               s,
@@ -660,8 +678,21 @@ export class PosCatalogService {
       },
       select: { id: true, name: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-      take: 16,
-    }).then((groups) => groups.map((group) => ({ ...group, icon: '', buttonSize: 'MEDIUM', kind: 'CATEGORY' })));
+      take: 50,
+    }).then((groups) => {
+      const priority = ['fruta', 'verdura', 'panader', 'fiambre', 'leña', 'carbon', 'carbón'];
+      return groups
+        .sort((a, b) => {
+          const rank = (name: string) => {
+            const normalized = name.toLocaleLowerCase('es-AR');
+            const index = priority.findIndex((term) => normalized.includes(term));
+            return index < 0 ? priority.length : index;
+          };
+          return rank(a.name) - rank(b.name) || a.name.localeCompare(b.name, 'es-AR');
+        })
+        .slice(0, 16)
+        .map((group) => ({ ...group, icon: '', buttonSize: 'MEDIUM', kind: 'CATEGORY' }));
+    });
   }
 
   category(s: Session, branchId: string, categoryId: string) {

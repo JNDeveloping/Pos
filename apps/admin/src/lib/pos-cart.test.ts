@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addProductToCart, lineSubtotal, paymentSummary, POS_SHORTCUTS, type PosProduct } from './pos-cart';
+import { addProductToCart, createQuickSaleLine, lineSubtotal, paymentSummary, POS_SHORTCUTS, type PosProduct } from './pos-cart';
 const product: PosProduct = {
   id: '1',
   branchProductId: 'b',
@@ -14,10 +14,25 @@ const product: PosProduct = {
   allowManualPrice: true,
 };
 describe('POS cart', () => {
+  it('creates an identifiable quick sale without product stock', () => {
+    const line = createQuickSaleLine('Bolsa de hielo', 2500, 2);
+    expect(line.quickSale).toBe(true);
+    expect(line.productId).toBeUndefined();
+    expect(lineSubtotal(line)).toBe(5000);
+  });
   it('supports weighted decimal quantities and repeated scans', () => {
     const first = addProductToCart([], product, 0.85);
     expect(first[0].quantity).toBe(0.85);
     expect(addProductToCart(first, product, 0.15)[0].quantity).toBe(1);
+  });
+  it('accumulates twenty consecutive scans without losing quantities', () => {
+    const unit = { ...product, isWeighted: false, unitType: 'UNIT', available: 100 };
+    const cart = Array.from({ length: 20 }).reduce<ReturnType<typeof addProductToCart>>(
+      (current) => addProductToCart(current, unit),
+      [],
+    );
+    expect(cart).toHaveLength(1);
+    expect(cart[0].quantity).toBe(20);
   });
   it('calculates manual price and discounts', () => {
     expect(lineSubtotal({ ...addProductToCart([], product)[0], manualPrice: 1800, discountPercent: 10 })).toBe(1620);

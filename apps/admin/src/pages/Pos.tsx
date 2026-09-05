@@ -20,6 +20,7 @@ import {
 import { api, hasPermission, type Me } from '../lib/api';
 import {
   addProductToCart,
+  createQuickSaleLine,
   linePrice,
   lineSubtotal,
   POS_SHORTCUTS,
@@ -38,16 +39,20 @@ type QuickGroup = { id: string; name: string; icon?: string; buttonSize?: string
 type Cashier = { id: string; firstName: string; lastName: string; username: string };
 type CashSession = { id: string; terminalId: string; cashierUserId: string; openingAmount: string; terminal: Terminal; cashier: Cashier };
 type PosAppearance = { background?: string; backgroundOpacity?: number; backgroundOverlay?: string; backgroundBlur?: number; backgroundPosition?: string };
-type Suspended = { id: string; at: string; cashier: string; cart: CartLine[] };
-type Modal = 'help' | 'search' | 'edit' | 'discount' | 'suspended' | 'utilities' | 'payment' | 'closeCash' | null;
+type Suspended = { id: string; at: string; cashier: string; branchId?: string; cart: CartLine[] };
+type Modal = 'help' | 'search' | 'edit' | 'discount' | 'quickSale' | 'suspended' | 'utilities' | 'payment' | 'closeCash' | null;
 const money = (value: number) => value.toLocaleString('es-AR', { style: 'currency', currency: 'ARS' });
+const isFractional = (line: Pick<CartLine, 'isWeighted' | 'unitType'>) => line.isWeighted || line.unitType !== 'UNIT';
 const quantity = (line: CartLine) =>
-  line.isWeighted ? `${line.quantity.toLocaleString('es-AR', { minimumFractionDigits: 3 })} kg` : String(line.quantity);
+  isFractional(line)
+    ? `${line.quantity.toLocaleString('es-AR', { maximumFractionDigits: 3 })} ${line.unitType.toLocaleLowerCase('es-AR')}`
+    : String(line.quantity);
 const quickIcon = (name: string) => {
   const normalized = name.toLocaleLowerCase('es-AR');
   if (normalized.includes('pan')) return '🥖';
   if (normalized.includes('frut') || normalized.includes('verd')) return '🍎';
-  if (normalized.includes('carb')) return '🔥';
+  if (normalized.includes('carb') || normalized.includes('leñ')) return '🔥';
+  if (normalized.includes('fiambre')) return '🥩';
   if (normalized.includes('beb')) return '🥤';
   if (normalized.includes('láct') || normalized.includes('lact')) return '🥛';
   return '◉';
@@ -102,6 +107,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
   const total = useMemo(() => cart.reduce((sum, line) => sum + lineSubtotal(line), 0), [cart]);
   const discount = subtotal - total;
   const focusScanner = useCallback(() => setTimeout(() => scanner.current?.focus(), 0), []);
+  const searchRequest = useRef<AbortController | undefined>(undefined);
 
   useEffect(() => {
     if (!branch) return;
@@ -178,40 +184,55 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
         return;
       }
       try {
-        const next = addProductToCart(cart, product, amount ?? 1);
-        setCart(next);
+        setCart((current) => {
+          const next = addProductToCart(current, product, amount ?? 1);
+          return next;
+        });
         setSelectedId(product.id);
         setQuery('');
         setResults([]);
         setMessage({
           kind: 'ok',
-          text: `${product.name} agregado · ${money(lineSubtotal(next.find((x) => x.id === product.id)!))}`,
+          text: `${product.name} agregado`,
         });
       } catch (error) {
         setMessage({ kind: 'error', text: (error as Error).message });
       }
       focusScanner();
     },
-    [cart, focusScanner],
+    [focusScanner],
   );
 
   const lookup = useCallback(
-    async (raw: string, addExact = true) => {
+    async (raw: string, addExact = true, signal?: AbortSignal) => {
       if (!branch || !raw.trim()) return;
       const term = raw.trim();
       setBusy(true);
       setMessage(undefined);
       try {
         if (/^\d{3,64}$/.test(term)) {
-          const product = await api<PosProduct>(
-            `/pos/products/by-barcode/${encodeURIComponent(term)}?branchId=${branch.id}`,
-          );
+          let product: PosProduct;
+          try {
+            product = await api<PosProduct>(
+              `/pos/products/by-barcode/${encodeURIComponent(term)}?branchId=${branch.id}`,
+              { signal },
+            );
+          } catch (error) {
+            if (signal?.aborted) return;
+            const alternatives = await api<PosProduct[]>(
+              `/pos/products/search?branchId=${branch.id}&q=${encodeURIComponent(term)}`,
+              { signal },
+            );
+            if (alternatives.length !== 1) throw error;
+            product = alternatives[0];
+          }
           setOnline(true);
           if (addExact) add(product);
           else setResults([product]);
         } else {
           const found = await api<PosProduct[]>(
             `/pos/products/search?branchId=${branch.id}&q=${encodeURIComponent(term)}`,
+            { signal },
           );
           setOnline(true);
           setResults(found);
@@ -221,6 +242,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
           else setModal('search');
         }
       } catch (error) {
+        if (signal?.aborted) return;
         const text = (error as Error).message;
         if (text.includes('Sin conexión')) setOnline(false);
         setMessage({ kind: 'error', text });
@@ -230,6 +252,19 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
     },
     [add, branch],
   );
+
+  useEffect(() => {
+    const term = query.trim();
+    if (term.length < 2 || /^\d{3,64}$/.test(term) || modal) return;
+    searchRequest.current?.abort();
+    const controller = new AbortController();
+    searchRequest.current = controller;
+    const timer = setTimeout(() => void lookup(term, false, controller.signal), 220);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [lookup, modal, query]);
 
   const openQuickGroup = async (groupId: string) => {
     if (!branch || busy) return;
@@ -295,19 +330,21 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
   }, [cart, selectedId, focusScanner]);
   const suspend = useCallback(() => {
     if (!cart.length) return;
-    setSuspended((items) => [{ id: crypto.randomUUID(), at: new Date().toISOString(), cashier: `${me.user.firstName} ${me.user.lastName}`, cart }, ...items]);
+    setSuspended((items) => [{ id: crypto.randomUUID(), at: new Date().toISOString(), cashier: `${me.user.firstName} ${me.user.lastName}`, branchId: branch?.id, cart }, ...items]);
     setCart([]);
     setSelectedId(undefined);
     setModal(null);
     setMessage({ kind: 'info', text: 'Venta suspendida' });
     focusScanner();
-  }, [cart, focusScanner]);
+  }, [branch?.id, cart, focusScanner, me.user.firstName, me.user.lastName]);
   const openEdit = useCallback(
     (kind: Modal) => {
       if (!selected) return setMessage({ kind: 'info', text: 'Seleccioná un producto del carrito.' });
+      if (kind === 'discount' && !hasPermission(me, 'sales.discountItem'))
+        return setMessage({ kind: 'error', text: 'Tu usuario no tiene permiso para aplicar descuentos.' });
       setModal(kind);
     },
-    [selected],
+    [me, selected],
   );
 
   useEffect(() => {
@@ -349,7 +386,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
             line.id === selected.id
               ? {
                   ...line,
-                  quantity: Math.max(line.isWeighted ? 0.001 : 1, line.quantity - (line.isWeighted ? 0.05 : 1)),
+                  quantity: Math.max(isFractional(line) ? 0.001 : 1, line.quantity - (isFractional(line) ? 0.05 : 1)),
                 }
               : line,
           ),
@@ -450,12 +487,23 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && void lookup(query)}
-              placeholder="Escanear barcode o buscar nombre, código, SKU o marca (F2)"
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                const scanned = query;
+                setQuery('');
+                void lookup(scanned);
+              }}
+              placeholder="Escanear o buscar nombre, código interno, SKU o código alternativo (F2)"
             />
             <button disabled={busy} onClick={() => void lookup(query)}>
               <Search />
             </button>
+            {hasPermission(me, 'sales.manualPrice') && (
+              <button className="pos-quick-sale-button" type="button" title="Venta rápida sin producto registrado" onClick={() => setModal('quickSale')}>
+                <Plus /> Venta rápida
+              </button>
+            )}
           </div>
           {message && <div className={`pos-feedback ${message.kind}`}>{message.text}</div>}
           {(quickGroups.length > 0 || favorites.length > 0) && (
@@ -527,8 +575,8 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
                               ? {
                                   ...x,
                                   quantity: Math.max(
-                                    line.isWeighted ? 0.001 : 1,
-                                    x.quantity - (line.isWeighted ? 0.05 : 1),
+                                    isFractional(line) ? 0.001 : 1,
+                                    x.quantity - (isFractional(line) ? 0.05 : 1),
                                   ),
                                 }
                               : x,
@@ -692,9 +740,26 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
           }}
         />
       )}
+      {modal === 'quickSale' && (
+        <QuickSaleModal
+          close={() => { setModal(null); focusScanner(); }}
+          save={(name, price, amount) => {
+            try {
+              const line = createQuickSaleLine(name, price, amount);
+              setCart((current) => [...current, line]);
+              setSelectedId(line.id);
+              setModal(null);
+              setMessage({ kind: 'ok', text: `${line.name} agregado como venta rápida` });
+              focusScanner();
+            } catch (error) {
+              setMessage({ kind: 'error', text: (error as Error).message });
+            }
+          }}
+        />
+      )}
       {modal === 'suspended' && (
         <SuspendedModal
-          sales={suspended}
+          sales={suspended.filter((sale) => !sale.branchId || sale.branchId === branch?.id)}
           close={() => {
             setModal(null);
             focusScanner();
@@ -739,7 +804,8 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
                   terminalId,
                   cashSessionId: cashSession?.id,
                   items: cart.map((line) => ({
-                    productId: line.id,
+                    productId: line.quickSale ? undefined : line.id,
+                    description: line.quickSale ? line.name : undefined,
                     quantity: line.quantity,
                     expectedUnitPrice: line.originalPrice,
                     manualPrice: line.manualPrice,
@@ -871,12 +937,12 @@ function EditModal({
   close: () => void;
   save: (v: { quantity: number; manualPrice?: number; note?: string }) => void;
 }) {
-  const [qty, setQty] = useState(String(line && 'quantity' in line ? line.quantity : line?.isWeighted ? '' : 1)),
+  const [qty, setQty] = useState(String(line && 'quantity' in line ? line.quantity : line && isFractional(line) ? '' : 1)),
     [price, setPrice] = useState(line ? linePrice(line as CartLine) : 0),
     [note, setNote] = useState(line && 'note' in line ? line.note ?? '' : '');
   if (!line) return null;
   return (
-    <ModalFrame title={line.isWeighted ? 'Ingresar peso' : 'Editar producto'} close={close}>
+    <ModalFrame title={line.isWeighted ? 'Ingresar peso' : isFractional(line) ? 'Ingresar cantidad fraccionada' : 'Editar producto'} close={close}>
       <form
         className="pos-form"
         onSubmit={(e) => {
@@ -890,14 +956,14 @@ function EditModal({
           <input
             autoFocus
             type="number"
-            min={line.isWeighted ? '.001' : '1'}
-            step={line.isWeighted ? '.001' : '1'}
+            min={isFractional(line) ? '.001' : '1'}
+            step={isFractional(line) ? '.001' : '1'}
             value={qty}
             onChange={(e) => setQty(e.target.value)}
           />
         </label>
         <div className="pos-number-pad" aria-label="Teclado numérico">
-          {['1', '2', '3', '4', '5', '6', '7', '8', '9', line.isWeighted ? '.' : '00', '0', '⌫'].map((key) => (
+          {['1', '2', '3', '4', '5', '6', '7', '8', '9', isFractional(line) ? '.' : '00', '0', '⌫'].map((key) => (
             <button type="button" key={key} onClick={() => setQty((current) => key === '⌫' ? current.slice(0, -1) : key === '.' && current.includes('.') ? current : `${current}${key}`)}>{key}</button>
           ))}
         </div>
@@ -978,6 +1044,23 @@ function DiscountModal({
           APLICAR
         </button>
       </div>
+    </ModalFrame>
+  );
+}
+
+function QuickSaleModal({ close, save }: { close: () => void; save: (name: string, price: number, quantity: number) => void }) {
+  const [name, setName] = useState('Venta rápida');
+  const [price, setPrice] = useState('');
+  const [quantity, setQuantity] = useState('1');
+  return (
+    <ModalFrame title="Venta rápida sin producto registrado" close={close}>
+      <form className="pos-form" onSubmit={(event) => { event.preventDefault(); save(name, Number(price), Number(quantity)); }}>
+        <p className="pos-feedback info">No modifica stock. Requiere permiso de precio manual y queda identificada en venta y auditoría.</p>
+        <label>Descripción<input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
+        <label>Precio<input autoFocus inputMode="decimal" type="number" min="0.01" step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} /></label>
+        <label>Cantidad<input inputMode="decimal" type="number" min="0.001" step="0.001" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label>
+        <button className="pos-pay" disabled={!name.trim() || Number(price) <= 0 || Number(quantity) <= 0}>AGREGAR</button>
+      </form>
     </ModalFrame>
   );
 }
