@@ -48,6 +48,7 @@ export class AuthGuard implements CanActivate {
       where: { id: req.session!.sub, companyId: req.session!.companyId, active: true, deletedAt: null },
       select: {
         tokenVersion: true,
+        branchId: true,
         roles: {
           select: {
             role: {
@@ -58,6 +59,7 @@ export class AuthGuard implements CanActivate {
       },
     });
     if (!user || user.tokenVersion !== req.session!.tokenVersion) throw new UnauthorizedException('Sesión revocada');
+    req.session!.branchId = user.branchId;
     req.session!.roles = user.roles.filter(({ role }) => role.active).map(({ role }) => role.code);
     req.session!.permissions = [
       ...new Set(user.roles.flatMap(({ role }) => role.permissions.map(({ permission }) => permission.code))),

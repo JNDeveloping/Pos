@@ -83,6 +83,16 @@ describe('cliente API', () => {
     await Promise.all([api('/products'), api('/categories')]);
     expect(refreshCalls).toBe(1);
   });
+  it('recupera una sesión persistente después de cerrar y volver a abrir el navegador', async () => {
+    const session = storageWith();
+    const persistent = storageWith({ accessToken: 'persistent-access', refreshToken: 'persistent-refresh' });
+    vi.stubGlobal('sessionStorage', session);
+    vi.stubGlobal('localStorage', persistent);
+    const { readAccessToken, readRefreshToken } = await import('./auth-session');
+    expect(readAccessToken()).toBe('persistent-access');
+    expect(readRefreshToken()).toBe('persistent-refresh');
+    expect(session.setItem).toHaveBeenCalledWith('accessToken', 'persistent-access');
+  });
 });
 
 describe('helpers RBAC', () => {

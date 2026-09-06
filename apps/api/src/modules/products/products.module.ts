@@ -13,7 +13,13 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { BarcodeType, ChangeSource, NetContentUnit, PresentationType, Prisma, UnitType } from '@prisma/client';
 import {
   IsBoolean,
@@ -45,6 +51,8 @@ class ProductBranchDto {
   @IsOptional() @IsBoolean() allowManualPrice?: boolean;
   @IsOptional() @IsString() location?: string;
   @IsOptional() @IsString() shelf?: string;
+  @IsOptional() @IsNumberString() saleFloorStock?: string;
+  @IsOptional() @IsNumberString() warehouseStock?: string;
 }
 class ProductDto {
   @IsOptional() @IsString() @Length(2, 50) internalCode?: string;
@@ -70,6 +78,16 @@ class ProductDto {
   @IsOptional() @IsString() notes?: string;
   @IsOptional() @IsString() @Matches(/^\d+$/, { message: 'El código debe ser numérico' }) barcode?: string;
   @IsOptional() @ValidateNested() @Type(() => ProductBranchDto) branchConfig?: ProductBranchDto;
+}
+class QuickProductDto {
+  @IsString() @Length(2, 180) name!: string;
+  @IsString() @Matches(/^\d+$/, { message: 'El código debe ser numérico' }) barcode!: string;
+  @IsNumberString() salePrice!: string;
+  @IsUUID() branchId!: string;
+  @IsOptional() @IsUUID() categoryId?: string;
+  @IsOptional() @IsNumberString() cost?: string;
+  @IsOptional() @IsNumberString() initialStock?: string;
+  @IsOptional() @IsString() imageUrl?: string;
 }
 class ProductPatchDto {
   @IsOptional() @IsString() @Length(2, 50) internalCode?: string;
@@ -108,6 +126,7 @@ class ConfigDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
   @IsOptional() @IsBoolean() posFavorite?: boolean;
   @IsOptional() @IsBoolean() allowManualPrice?: boolean;
+  @IsOptional() @IsBoolean() queueLabel?: boolean;
   @IsOptional() @IsString() location?: string;
   @IsOptional() @IsString() shelf?: string;
   @IsOptional() @IsString() internalNotes?: string;
@@ -153,7 +172,7 @@ class ImportBatchDto {
 }
 @ApiTags('Productos')
 @Controller('products')
-class ProductsController {
+export class ProductsController {
   constructor(private db: PrismaService) {}
   private include = {
     category: true,
@@ -234,6 +253,34 @@ class ProductsController {
         }));
     return { data: safeData, meta: { page: q.page, limit: q.limit, total, pages: Math.ceil(total / q.limit) } };
   }
+  @Post('quick') @RequirePermissions('products.create') async quickCreate(
+    @CurrentSession() s: Session,
+    @Body() d: QuickProductDto,
+  ) {
+    let categoryId = d.categoryId;
+    if (!categoryId) {
+      const category = await this.db.category.findFirst({
+        where: { companyId: s.companyId, deletedAt: null, name: { equals: 'Sin clasificar', mode: 'insensitive' } },
+      }) ?? await this.db.category.create({ data: { companyId: s.companyId, name: 'Sin clasificar' } });
+      categoryId = category.id;
+    }
+    return this.create(s, {
+      name: d.name,
+      barcode: d.barcode,
+      categoryId,
+      imageUrl: d.imageUrl,
+      unitType: UnitType.UNIT,
+      taxRate: '21',
+      branchConfig: {
+        branchId: d.branchId,
+        salePrice: d.salePrice,
+        cost: d.cost,
+        saleFloorStock: d.initialStock,
+        warehouseStock: '0',
+        enabled: true,
+      },
+    });
+  }
   @Post('bulk-disable') @RequirePermissions('products.disable') async bulkDisable(
     @CurrentSession() s: Session,
     @Body('productIds') productIds: string[],
@@ -256,6 +303,34 @@ class ProductsController {
       },
     });
     return result;
+  }
+  @Get('bulk-delete-all/summary') @RequirePermissions('products.disable') async deleteAllSummary(
+    @CurrentSession() s: Session,
+  ) {
+    if (!s.roles.includes('SUPER_ADMIN')) throw new ForbiddenException('Sólo SUPER_ADMIN puede eliminar todo el catálogo');
+    return { count: await this.db.product.count({ where: { companyId: s.companyId, deletedAt: null } }) };
+  }
+  @Post('bulk-delete-all') @RequirePermissions('products.disable') async deleteAll(
+    @CurrentSession() s: Session,
+    @Body('confirmation') confirmation: string,
+  ) {
+    if (!s.roles.includes('SUPER_ADMIN')) throw new ForbiddenException('Sólo SUPER_ADMIN puede eliminar todo el catálogo');
+    if (confirmation !== 'ELIMINAR') throw new BadRequestException('Confirmación inválida');
+    const now = new Date();
+    return this.db.$transaction(async (tx) => {
+      const products = await tx.product.updateMany({
+        where: { companyId: s.companyId, deletedAt: null },
+        data: { active: false, deletedAt: now },
+      });
+      await tx.branchProduct.updateMany({
+        where: { branch: { companyId: s.companyId }, product: { deletedAt: now } },
+        data: { enabled: false },
+      });
+      await tx.auditLog.create({
+        data: { companyId: s.companyId, userId: s.sub, entityType: 'PRODUCT', entityId: s.companyId, action: 'ALL_PRODUCTS_DISABLED', metadata: { count: products.count } },
+      });
+      return { count: products.count };
+    }, { timeout: 60000 });
   }
   @Get(':id') @RequirePermissions('products.view') async one(@CurrentSession() s: Session, @Param('id') id: string) {
     const p = await this.db.product.findFirst({
@@ -324,6 +399,18 @@ class ProductsController {
             shelf: branchConfig.shelf,
           },
         });
+        const saleFloor = new Prisma.Decimal(branchConfig.saleFloorStock ?? 0),
+          warehouse = new Prisma.Decimal(branchConfig.warehouseStock ?? 0),
+          total = saleFloor.plus(warehouse);
+        if (saleFloor.lt(0) || warehouse.lt(0)) throw new BadRequestException('El stock inicial no puede ser negativo');
+        if (total.gt(0)) {
+          await tx.stock.create({ data: { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, quantity: total } });
+          await tx.stockLocationBalance.createMany({ data: [
+            { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, location: 'SALE_FLOOR', quantity: saleFloor },
+            { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, location: 'WAREHOUSE', quantity: warehouse },
+          ] });
+          await tx.stockMovement.create({ data: { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, type: 'INITIAL_STOCK', quantity: total, previousQuantity: 0, newQuantity: total, reason: 'Alta de producto', userId: s.sub, metadata: { saleFloor: saleFloor.toString(), warehouse: warehouse.toString() } } });
+        }
       }
       await tx.auditLog.create({
         data: {
@@ -337,6 +424,23 @@ class ProductsController {
       });
       return product;
     });
+  }
+  @Post('image') @RequirePermissions('products.create')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 8 * 1024 * 1024, files: 1 } }))
+  async uploadImage(@CurrentSession() s: Session, @UploadedFile() file?: { buffer: Buffer; mimetype: string }) {
+    if (!file) throw new BadRequestException('Seleccione una imagen');
+    const extensions: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+    const extension = extensions[file.mimetype];
+    if (!extension) throw new BadRequestException('Use una imagen JPG, PNG o WebP');
+    const valid = (extension === 'jpg' && file.buffer[0] === 0xff && file.buffer[1] === 0xd8) ||
+      (extension === 'png' && file.buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) ||
+      (extension === 'webp' && file.buffer.subarray(0, 4).toString() === 'RIFF' && file.buffer.subarray(8, 12).toString() === 'WEBP');
+    if (!valid) throw new BadRequestException('El archivo no contiene una imagen válida');
+    const directory = resolve(process.cwd(), 'uploads/public/products', s.companyId);
+    await mkdir(directory, { recursive: true });
+    const filename = `${randomUUID()}.${extension}`;
+    await writeFile(resolve(directory, filename), file.buffer, { flag: 'wx' });
+    return { url: `/api/uploads/products/${s.companyId}/${filename}` };
   }
   @Get('export/data') @RequirePermissions('products.export') async exportData(
     @CurrentSession() s: Session,
@@ -799,6 +903,17 @@ class ProductsController {
             percentageChange: this.percentage(current.salePrice, price),
             source: d.source ?? ChangeSource.MANUAL,
             changedByUserId: s.sub,
+          },
+        });
+      if (current && !current.salePrice.equals(price) && d.queueLabel)
+        await tx.labelPrintQueue.create({
+          data: {
+            companyId: s.companyId,
+            branchId,
+            productId: id,
+            userId: s.sub,
+            oldPrice: current.salePrice,
+            newPrice: price,
           },
         });
       if (current && !current.cost.equals(cost))

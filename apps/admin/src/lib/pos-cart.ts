@@ -6,6 +6,8 @@ export type PosProduct = {
   internalCode: string;
   barcode?: string;
   brand?: string;
+  categoryId?: string;
+  category?: string;
   presentation?: string;
   unitType: string;
   price: string;

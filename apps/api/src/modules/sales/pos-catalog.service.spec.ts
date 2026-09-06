@@ -17,6 +17,8 @@ function database(product?: { active?: boolean; enabled?: boolean; price?: numbe
         presentationType: 'BOTTLE',
         unitType: 'UNIT',
         brand: { name: 'Coca Cola' },
+        categoryId: 'cat',
+        category: { name: 'Bebidas' },
         barcodes: [{ barcode: '779123', isPrimary: true }],
         branchConfigs:
           product.enabled === false
@@ -45,6 +47,8 @@ function database(product?: { active?: boolean; enabled?: boolean; price?: numbe
         ),
     },
     priceListItem: { findMany: jest.fn().mockResolvedValue([]) },
+    category: { findMany: jest.fn().mockResolvedValue([{ id: 'cat', name: 'Bebidas' }]) },
+    posQuickGroup: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn() },
   };
 }
 describe('PosCatalogService', () => {
@@ -70,5 +74,11 @@ describe('PosCatalogService', () => {
     const service = new PosCatalogService(db as never);
     await service.search(session, 'b', 'coca');
     expect(db.product.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 30 }));
+  });
+  it('lists quick groups without requiring catalog administration permissions', async () => {
+    const db = database({});
+    const service = new PosCatalogService(db as never);
+    await expect(service.quickGroups(session, 'b')).resolves.toEqual([{ id: 'cat', name: 'Bebidas', icon: '', buttonSize: 'MEDIUM', kind: 'CATEGORY' }]);
+    expect(db.category.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 16 }));
   });
 });

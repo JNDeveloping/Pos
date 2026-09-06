@@ -7,6 +7,10 @@ export type PermissionDefinition = {
   active: boolean;
 };
 const modules: Record<string, string[]> = {
+  PANELS: [
+    'panels.cashier|Ingresar al panel de caja',
+    'panels.admin|Ingresar al panel de administración',
+  ],
   DASHBOARD: ['dashboard.view|Ver panel'],
   PRODUCTS: [
     'products.view|Ver productos',
@@ -106,6 +110,8 @@ const modules: Record<string, string[]> = {
   ],
   SALES: [
     'sales.access|Acceder al POS',
+    'cashSessions.open|Dar de alta / abrir caja',
+    'cashSessions.close|Dar de baja / cerrar caja',
     'sales.view|Ver ventas',
     'sales.create|Crear ventas',
     'sales.cancel|Anular ventas',
@@ -130,11 +136,13 @@ export const SYSTEM_PERMISSIONS: PermissionDefinition[] = Object.entries(modules
 export const permissionDefinitions = SYSTEM_PERMISSIONS;
 export const permissionCodes = SYSTEM_PERMISSIONS.map((x) => x.code);
 export const adminPermissionCodes = permissionCodes.filter(
-  (code) => !['roles.manage', 'users.delete', 'branches.delete', 'stock.adjust'].includes(code),
+  (code) => code !== 'panels.cashier' && !['roles.manage', 'users.delete', 'branches.delete', 'stock.adjust'].includes(code),
 );
 export const managerPermissionCodes = permissionCodes.filter((code) =>
   [
     'dashboard.view',
+    'panels.admin',
+    'panels.cashier',
     'products.view',
     'products.create',
     'products.update',
@@ -164,6 +172,8 @@ export const managerPermissionCodes = permissionCodes.filter((code) =>
     'labels.generate',
     'stock.view',
     'sales.access',
+    'cashSessions.open',
+    'cashSessions.close',
     'sales.view',
     'sales.create',
     'sales.cancel',

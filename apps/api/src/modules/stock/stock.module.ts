@@ -14,6 +14,7 @@ import {
   InventoryStatus,
   InventoryType,
   Prisma,
+  StockLocationType,
   StockMovementType,
   StockTransferStatus,
   WasteType,
@@ -40,6 +41,12 @@ class AdjustmentDto {
   @IsEnum(['INCREASE', 'DECREASE', 'SET', 'INITIAL']) mode!: 'INCREASE' | 'DECREASE' | 'SET' | 'INITIAL';
   @IsNumber() @Min(0) quantity!: number;
   @IsString() @MinLength(3) reason!: string;
+  @IsOptional() @IsEnum(StockLocationType) location?: StockLocationType;
+}
+class ReplenishmentDto {
+  @IsUUID() branchId!: string;
+  @IsUUID() productId!: string;
+  @IsNumber() @Min(0.001) quantity!: number;
 }
 class InventoryDto {
   @IsUUID() branchId!: string;
@@ -94,6 +101,7 @@ export class StockService {
     reason?: string,
     referenceType?: string,
     referenceId?: string,
+    requestedLocation?: StockLocationType,
   ) {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${branchId + ':' + productId}))`;
     if (referenceType && referenceId) {
@@ -109,6 +117,13 @@ export class StockService {
       create: { companyId: s.companyId, branchId, productId },
       update: {},
     });
+    const warehouseTypes = new Set<StockMovementType>([StockMovementType.PURCHASE_RECEIPT, StockMovementType.TRANSFER_IN, StockMovementType.TRANSFER_OUT]);
+    const location = requestedLocation ?? (warehouseTypes.has(type) ? StockLocationType.WAREHOUSE : StockLocationType.SALE_FLOOR);
+    const locationBalance = await tx.stockLocationBalance.upsert({
+      where: { branchId_productId_location: { branchId, productId, location } },
+      create: { companyId: s.companyId, branchId, productId, location },
+      update: {},
+    });
     let value: number;
     try {
       value = nextStock(Number(current.quantity), delta, branch.allowNegativeStock);
@@ -116,6 +131,8 @@ export class StockService {
       throw new BadRequestException((error as Error).message);
     }
     await tx.stock.update({ where: { id: current.id }, data: { quantity: value } });
+    const locationValue = nextStock(Number(locationBalance.quantity), delta, branch.allowNegativeStock);
+    await tx.stockLocationBalance.update({ where: { id: locationBalance.id }, data: { quantity: locationValue } });
     return tx.stockMovement.create({
       data: {
         companyId: s.companyId,
@@ -129,6 +146,7 @@ export class StockService {
         referenceType,
         referenceId,
         userId: s.sub,
+        metadata: { location },
       },
     });
   }
@@ -136,8 +154,9 @@ export class StockService {
   adjust(s: Session, dto: AdjustmentDto) {
     return this.db.$transaction(
       async (tx) => {
-        const current = await tx.stock.findUnique({
-          where: { branchId_productId: { branchId: dto.branchId, productId: dto.productId } },
+        const location = dto.location ?? StockLocationType.SALE_FLOOR;
+        const current = await tx.stockLocationBalance.findUnique({
+          where: { branchId_productId_location: { branchId: dto.branchId, productId: dto.productId, location } },
         });
         const delta =
           dto.mode === 'SET' || dto.mode === 'INITIAL'
@@ -151,7 +170,7 @@ export class StockService {
             : delta < 0
               ? StockMovementType.MANUAL_DECREASE
               : StockMovementType.MANUAL_INCREASE;
-        const movement = await this.change(tx, s, dto.branchId, dto.productId, delta, type, dto.reason);
+        const movement = await this.change(tx, s, dto.branchId, dto.productId, delta, type, dto.reason, undefined, undefined, location);
         await tx.auditLog.create({
           data: {
             companyId: s.companyId,
@@ -160,13 +179,40 @@ export class StockService {
             action: dto.mode === 'INITIAL' ? 'INITIAL_STOCK_LOADED' : 'STOCK_ADJUSTED',
             entityType: 'STOCK',
             entityId: dto.productId,
-            metadata: { mode: dto.mode, quantity: dto.quantity, reason: dto.reason },
+            metadata: { mode: dto.mode, quantity: dto.quantity, reason: dto.reason, location },
           },
         });
         return movement;
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+  }
+
+  replenish(s: Session, dto: ReplenishmentDto) {
+    return this.db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dto.branchId + ':' + dto.productId}))`;
+      const allowed = await tx.branchProduct.findFirst({
+        where: { branchId: dto.branchId, productId: dto.productId, branch: { companyId: s.companyId, active: true } },
+      });
+      if (!allowed || (s.branchId && s.branchId !== dto.branchId)) throw new BadRequestException('Producto o sucursal inválidos');
+      const balances = await Promise.all([StockLocationType.WAREHOUSE, StockLocationType.SALE_FLOOR].map((location) =>
+        tx.stockLocationBalance.upsert({
+          where: { branchId_productId_location: { branchId: dto.branchId, productId: dto.productId, location } },
+          create: { companyId: s.companyId, branchId: dto.branchId, productId: dto.productId, location },
+          update: {},
+        })));
+      const warehouse = balances[0], saleFloor = balances[1];
+      if (Number(warehouse.quantity) < dto.quantity) throw new BadRequestException('No hay suficiente stock en depósito');
+      await tx.stockLocationBalance.update({ where: { id: warehouse.id }, data: { quantity: { decrement: dto.quantity } } });
+      await tx.stockLocationBalance.update({ where: { id: saleFloor.id }, data: { quantity: { increment: dto.quantity } } });
+      const total = await tx.stock.findUnique({ where: { branchId_productId: { branchId: dto.branchId, productId: dto.productId } } });
+      await tx.stockMovement.createMany({ data: [
+        { companyId: s.companyId, branchId: dto.branchId, productId: dto.productId, type: StockMovementType.MANUAL_DECREASE, quantity: -dto.quantity, previousQuantity: total?.quantity ?? 0, newQuantity: total?.quantity ?? 0, reason: 'Reposición depósito → local', userId: s.sub, metadata: { from: 'WAREHOUSE', to: 'SALE_FLOOR' } },
+        { companyId: s.companyId, branchId: dto.branchId, productId: dto.productId, type: StockMovementType.MANUAL_INCREASE, quantity: dto.quantity, previousQuantity: total?.quantity ?? 0, newQuantity: total?.quantity ?? 0, reason: 'Reposición depósito → local', userId: s.sub, metadata: { from: 'WAREHOUSE', to: 'SALE_FLOOR' } },
+      ] });
+      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: dto.branchId, userId: s.sub, entityType: 'STOCK', entityId: dto.productId, action: 'STOCK_REPLENISHED', metadata: { quantity: dto.quantity, from: 'WAREHOUSE', to: 'SALE_FLOOR' } } });
+      return { quantity: dto.quantity, saleFloorQuantity: Number(saleFloor.quantity) + dto.quantity, warehouseQuantity: Number(warehouse.quantity) - dto.quantity };
+    });
   }
 
   async receivePurchaseInTransaction(
@@ -228,14 +274,15 @@ class StockController {
       orderBy: { product: { name: 'asc' } },
       take: 500,
     });
-    const rows = await this.db.stock.findMany({
+    const [rows, locationRows] = await Promise.all([this.db.stock.findMany({
       where: {
         companyId: s.companyId,
         branchId: effectiveBranchId,
         productId: { in: configs.map((config) => config.productId) },
       },
-    });
+    }), this.db.stockLocationBalance.findMany({ where: { companyId: s.companyId, branchId: effectiveBranchId, productId: { in: configs.map((config) => config.productId) } } })]);
     const stockByKey = new Map(rows.map((row) => [`${row.branchId}:${row.productId}`, row]));
+    const locationByKey = new Map(locationRows.map((row) => [`${row.productId}:${row.location}`, Number(row.quantity)]));
     return configs.map((config) => {
       const stock = stockByKey.get(`${config.branchId}:${config.productId}`);
       const quantity = Number(stock?.quantity ?? 0),
@@ -254,6 +301,8 @@ class StockController {
         minimumStock: minimum,
         status: stockStatus(available, minimum),
         stockValue: quantity * Number(config.cost),
+        saleFloorQuantity: locationByKey.get(`${config.productId}:SALE_FLOOR`) ?? 0,
+        warehouseQuantity: locationByKey.get(`${config.productId}:WAREHOUSE`) ?? 0,
       };
     });
   }
@@ -275,6 +324,9 @@ class StockController {
   }
   @Post('adjust') @RequirePermissions('stock.adjust') adjust(@CurrentSession() s: Session, @Body() dto: AdjustmentDto) {
     return this.stock.adjust(s, dto);
+  }
+  @Post('replenish') @RequirePermissions('stock.adjust') replenish(@CurrentSession() s: Session, @Body() dto: ReplenishmentDto) {
+    return this.stock.replenish(s, dto);
   }
   @Get('expirations')
   @RequirePermissions('expirations.view')

@@ -1,13 +1,16 @@
 import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { ApiExceptionFilter } from './common/filters/http-exception.filter';
+import { resolve } from 'node:path';
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.setGlobalPrefix('api');
+  app.useStaticAssets(resolve(process.cwd(), 'uploads/public'), { prefix: '/api/uploads/' });
   app.use(helmet());
   app.enableCors({ origin: (process.env.CORS_ORIGIN ?? 'http://localhost:5173').split(','), credentials: true });
   app.useGlobalFilters(new ApiExceptionFilter());

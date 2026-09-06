@@ -8,6 +8,7 @@ type Detail = RoleView & {
   users: { user: { id: string; username: string; firstName: string; lastName: string; active: boolean } }[];
 };
 const moduleLabels: Record<string, string> = {
+  PANELS: 'Acceso a paneles',
   DASHBOARD: 'Panel',
   PRODUCTS: 'Productos y catálogo',
   PRICES: 'Precios y costos',
@@ -19,12 +20,20 @@ const moduleLabels: Record<string, string> = {
   USERS: 'Usuarios',
   ROLES: 'Roles',
   OPERATIONS: 'Operación',
+  SALES: 'Caja y ventas',
+  TERMINALS: 'Terminales',
+  PAYMENT_METHODS: 'Medios de pago',
+  STOCK: 'Stock operativo',
 };
+const cashierModules = new Set(['PANELS', 'SALES', 'TERMINALS', 'PAYMENT_METHODS', 'PRODUCTS', 'PRICES', 'OPERATIONS', 'STOCK']);
+const cashierBasic = ['panels.cashier', 'sales.access', 'cashSessions.open', 'cashSessions.close', 'sales.create', 'products.view', 'terminals.view', 'paymentMethods.view'];
+const cashierAdvanced = [...cashierBasic, 'sales.view', 'sales.discountItem', 'sales.reprintTicket', 'products.create', 'products.update', 'categories.view', 'prices.view', 'prices.update', 'stock.view', 'stock.adjust', 'labels.view', 'labels.generate'];
 export function RoleDetail({ id }: { id: string }) {
   const [role, setRole] = useState<Detail>(),
     [permissions, setPermissions] = useState<Permission[]>([]),
     [selected, setSelected] = useState<Set<string>>(new Set()),
     [tab, setTab] = useState('PERMISOS'),
+    [permissionScope, setPermissionScope] = useState<'CASHIER' | 'ADMIN' | 'ALL'>('CASHIER'),
     [message, setMessage] = useState(''),
     [saving, setSaving] = useState(false);
   useEffect(() => {
@@ -36,17 +45,18 @@ export function RoleDetail({ id }: { id: string }) {
       })
       .catch((e) => setMessage(String(e)));
   }, [id]);
+  const visiblePermissions = useMemo(() => permissions.filter((permission) => permissionScope === 'ALL' || (permissionScope === 'CASHIER' ? cashierModules.has(permission.module) && permission.code !== 'panels.admin' : permission.code !== 'panels.cashier')), [permissionScope, permissions]);
   const grouped = useMemo(
     () =>
       Object.entries(
-        permissions.reduce((result: Record<string, Permission[]>, permission) => {
+        visiblePermissions.reduce((result: Record<string, Permission[]>, permission) => {
           const rows = result[permission.module] ?? [];
           rows.push(permission);
           result[permission.module] = rows;
           return result;
         }, {}),
       ),
-    [permissions],
+    [visiblePermissions],
   );
   if (!role) return <div className="card p-6">{message || 'Cargando rol…'}</div>;
   const locked = role.code === 'SUPER_ADMIN';
@@ -58,12 +68,21 @@ export function RoleDetail({ id }: { id: string }) {
       return next;
     });
   }
+  function applyCashierPreset(codes: string[]) {
+    if (locked) return;
+    setSelected((current) => {
+      const next = new Set(current);
+      permissions.filter((permission) => cashierModules.has(permission.module) && permission.code !== 'panels.admin').forEach((permission) => next.delete(permission.id));
+      permissions.filter((permission) => codes.includes(permission.code)).forEach((permission) => next.add(permission.id));
+      return next;
+    });
+  }
   async function save() {
     setSaving(true);
     setMessage('');
     try {
       await api(`/roles/${id}/permissions`, { method: 'PUT', body: JSON.stringify({ permissionIds: [...selected] }) });
-      setMessage('Permisos guardados. Las sesiones activas los reciben en la próxima petición.');
+      setMessage('Permisos guardados. Los usuarios del rol deben volver a ingresar para renovar su sesión.');
     } catch (e) {
       setMessage(String(e));
     } finally {
@@ -95,12 +114,17 @@ export function RoleDetail({ id }: { id: string }) {
           </button>
         ))}
       </div>
-      {message && <div className="rounded-xl bg-blue-50 p-4 text-sm text-blue-800">{message}</div>}
+      {message && <div className="rounded-xl bg-brand-50 p-4 text-sm text-brand-700">{message}</div>}
       {tab === 'PERMISOS' && (
         <>
+          <section className="role-panel-selector">
+            <div><p className="eyebrow">DOS PANELES, UN SOLO ROL</p><h2>¿Dónde puede trabajar este rol?</h2><p>Primero habilitá el panel y después elegí cada acción. Tener acceso al panel no autoriza automáticamente operaciones sensibles.</p></div>
+            <div>{(['CASHIER', 'ADMIN', 'ALL'] as const).map((scope) => <button className={permissionScope === scope ? 'active' : ''} onClick={() => setPermissionScope(scope)} key={scope}>{scope === 'CASHIER' ? 'Panel de caja' : scope === 'ADMIN' ? 'Panel del dueño' : 'Todos'}</button>)}</div>
+            {!locked && permissionScope === 'CASHIER' && <div className="role-presets"><button onClick={() => applyCashierPreset(cashierBasic)}>Caja básica</button><button onClick={() => applyCashierPreset(cashierAdvanced)}>Caja avanzada</button></div>}
+          </section>
           <div className="card flex flex-wrap items-center gap-3 p-4">
             <b className="mr-auto">
-              {selected.size} de {permissions.length} permisos
+              {selected.size} permisos asignados · mostrando {visiblePermissions.length}
             </b>
             {locked ? (
               <span className="badge bg-amber-50 text-amber-700">
@@ -113,7 +137,7 @@ export function RoleDetail({ id }: { id: string }) {
                   className="btn-secondary"
                   onClick={() =>
                     toggle(
-                      permissions.map((x) => x.id),
+                      visiblePermissions.map((x) => x.id),
                       true,
                     )
                   }
@@ -124,7 +148,7 @@ export function RoleDetail({ id }: { id: string }) {
                   className="btn-secondary"
                   onClick={() =>
                     toggle(
-                      permissions.map((x) => x.id),
+                      visiblePermissions.map((x) => x.id),
                       false,
                     )
                   }

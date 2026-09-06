@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   Store,
   Users,
+  Zap,
   X,
 } from 'lucide-react';
 import type { Me } from '../lib/api';
@@ -28,6 +29,7 @@ import { ConnectionStatus } from './ConnectionStatus';
 import type { Branch } from '../pages/Branches';
 import { appPath, currentRoute, navigate } from '../lib/navigation';
 import { clearTokens } from '../lib/auth-session';
+import { FullscreenButton } from './FullscreenButton';
 type NavItem = readonly [string, string, LucideIcon, string];
 const groups: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = [
   {
@@ -79,7 +81,7 @@ export function Layout({
         {!collapsed && (
           <span className="min-w-0">
             <b className="block truncate">{me.company.name}</b>
-            <small>Administración ERP</small>
+            <small>Centro de operaciones</small>
           </span>
         )}
         <button
@@ -91,11 +93,11 @@ export function Layout({
         </button>
       </div>
       <nav className="sidebar-nav">
-        {groups.map((group) => {
+        {groups.map((group, groupIndex) => {
           const visible = group.items.filter((i) => can(me, i[3]));
           return visible.length ? (
             <div key={group.label} className="nav-group">
-              {!collapsed && <p className="nav-label">{group.label}</p>}
+              {!collapsed && <p className="nav-label"><span>0{groupIndex + 1}</span>{group.label}</p>}
               {visible.map(([to, label, Icon]) => (
                 <a
                   key={to}
@@ -112,6 +114,13 @@ export function Layout({
           ) : null;
         })}
       </nav>
+      {!collapsed && (
+        <a className="sidebar-command" href={appPath('/')}>
+          <Zap size={18} />
+          <span><b>Modo venta</b><small>Volver al POS ahora</small></span>
+          <ChevronRight size={16} />
+        </a>
+      )}
       <button
         className="nav-item mt-auto text-slate-500"
         onClick={() => {
@@ -154,6 +163,7 @@ export function Layout({
           </label>
           <div className="ml-auto flex items-center gap-2">
             <ConnectionStatus />
+            <FullscreenButton />
             <button className="icon-button hidden sm:grid" aria-label="Notificaciones">
               <Bell size={19} />
               <span className="notification-dot" />

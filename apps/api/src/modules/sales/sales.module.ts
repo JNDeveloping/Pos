@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Injectable,
   Module,
@@ -47,6 +48,7 @@ class SaleDto {
   @IsUUID() operationId!: string;
   @IsUUID() branchId!: string;
   @IsUUID() terminalId!: string;
+  @IsOptional() @IsUUID() cashSessionId?: string;
   @IsOptional() @IsUUID() priceListId?: string;
   @IsArray() @ValidateNested({ each: true }) @Type(() => SaleLineDto) items!: SaleLineDto[];
   @IsArray() @ValidateNested({ each: true }) @Type(() => PaymentDto) payments!: PaymentDto[];
@@ -77,6 +79,27 @@ class TerminalDto {
   @IsString() @MinLength(1) code!: string;
   @IsString() @MinLength(2) name!: string;
   @IsOptional() @IsBoolean() active?: boolean;
+}
+class OpenCashSessionDto {
+  @IsUUID() branchId!: string;
+  @IsOptional() @IsUUID() terminalId?: string;
+  @IsOptional() @IsString() terminalName?: string;
+  @IsUUID() cashierUserId!: string;
+  @IsNumber() @Min(0) openingAmount!: number;
+}
+class CloseCashSessionDto {
+  @IsUUID() cashSessionId!: string;
+  @IsNumber() @Min(0) closingAmount!: number;
+  @IsOptional() @IsString() closingNote?: string;
+}
+class QuickGroupDto {
+  @IsUUID() branchId!: string;
+  @IsString() @MinLength(2) name!: string;
+  @IsString() @MinLength(1) icon!: string;
+  @IsOptional() @IsInt() sortOrder?: number;
+  @IsOptional() @IsString() buttonSize?: string;
+  @IsOptional() @IsBoolean() active?: boolean;
+  @IsArray() @IsUUID(undefined, { each: true }) productIds!: string[];
 }
 
 @Injectable()
@@ -134,6 +157,18 @@ class SalesService {
         });
         if (!branch || !terminal || (s.branchId && s.branchId !== dto.branchId))
           throw new BadRequestException('Sucursal o terminal inválida');
+        const cashSession = dto.cashSessionId
+          ? await tx.cashSession.findFirst({
+              where: {
+                id: dto.cashSessionId,
+                companyId: s.companyId,
+                branchId: dto.branchId,
+                terminalId: dto.terminalId,
+                status: 'OPEN',
+              },
+            })
+          : null;
+        if (branch.requireCashOpen && !cashSession) throw new BadRequestException('Debe abrir la caja antes de vender');
         const lines = [];
         for (const input of dto.items) {
           const { config, price: resolved } = await this.prices.resolve(
@@ -207,7 +242,8 @@ class SalesService {
             companyId: s.companyId,
             branchId: dto.branchId,
             terminalId: dto.terminalId,
-            userId: s.sub,
+            cashSessionId: cashSession?.id,
+            userId: cashSession?.cashierUserId ?? s.sub,
             saleNumber,
             status: SaleStatus.COMPLETED,
             priceListId: dto.priceListId,
@@ -472,6 +508,8 @@ type PosProduct = {
   internalCode: string;
   barcode?: string;
   brand?: string;
+  categoryId: string;
+  category: string;
   presentation?: string;
   unitType: string;
   price: Prisma.Decimal;
@@ -502,7 +540,7 @@ export class PosCatalogService {
     const branch = await this.branch(s, branchId);
     const products = await this.db.product.findMany({
       where: { companyId: s.companyId, deletedAt: null, ...where },
-      include: { brand: true, barcodes: true, branchConfigs: { where: { branchId } } },
+      include: { brand: true, category: true, barcodes: true, branchConfigs: { where: { branchId } } },
       orderBy: { name: 'asc' },
       take: exactLabel ? 2 : 30,
     });
@@ -535,6 +573,8 @@ export class PosCatalogService {
           internalCode: product.internalCode,
           barcode: product.barcodes.find((barcode) => barcode.isPrimary)?.barcode ?? product.barcodes[0]?.barcode,
           brand: product.brand?.name,
+          categoryId: product.categoryId,
+          category: product.category.name,
           presentation: product.presentationType ?? undefined,
           unitType: product.unitType,
           price: priceByProduct.get(product.id) ?? config.salePrice,
@@ -590,6 +630,53 @@ export class PosCatalogService {
   favorites(s: Session, branchId: string) {
     return this.resolve(s, branchId, { branchConfigs: { some: { branchId, enabled: true, posFavorite: true } } });
   }
+
+  async quickGroups(s: Session, branchId: string) {
+    await this.branch(s, branchId);
+    const configured = await this.db.posQuickGroup.findMany({
+      where: { companyId: s.companyId, branchId, active: true },
+      select: { id: true, name: true, icon: true, buttonSize: true },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    });
+    if (configured.length) return configured.map((group) => ({ ...group, kind: 'GROUP' }));
+    return this.db.category.findMany({
+      where: {
+        companyId: s.companyId,
+        active: true,
+        deletedAt: null,
+        products: { some: { active: true, deletedAt: null, branchConfigs: { some: { branchId, enabled: true } } } },
+      },
+      select: { id: true, name: true },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      take: 16,
+    }).then((groups) => groups.map((group) => ({ ...group, icon: '', buttonSize: 'MEDIUM', kind: 'CATEGORY' })));
+  }
+
+  category(s: Session, branchId: string, categoryId: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(categoryId)) throw new BadRequestException('Categoría inválida');
+    return this.resolve(s, branchId, { categoryId });
+  }
+  async settings(s: Session, branchId: string) {
+    await this.branch(s, branchId);
+    const [company, branch] = await Promise.all([
+      this.db.companySetting.findMany({ where: { companyId: s.companyId, key: { in: ['appearance', 'pos'] } } }),
+      this.db.branchSetting.findMany({ where: { companyId: s.companyId, branchId, key: { in: ['appearance', 'pos'] } } }),
+    ]);
+    return Object.fromEntries([...company, ...branch].map((setting) => [setting.key, setting.value]));
+  }
+
+  async quickGroup(s: Session, branchId: string, groupId: string) {
+    await this.branch(s, branchId);
+    const group = await this.db.posQuickGroup.findFirst({
+      where: { id: groupId, companyId: s.companyId, branchId, active: true },
+      include: { items: { orderBy: { sortOrder: 'asc' }, select: { productId: true } } },
+    });
+    if (!group) throw new NotFoundException('Grupo rápido no encontrado');
+    const order = group.items.map((item) => item.productId);
+    return this.resolve(s, branchId, { id: { in: order } }).then((products) =>
+      products.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)),
+    );
+  }
 }
 
 @Controller('pos/products')
@@ -614,6 +701,32 @@ class PosController {
     @Query('branchId') branchId: string,
   ) {
     return this.catalog.favorites(s, branchId);
+  }
+  @Get('quick-groups') @RequirePermissions('sales.access') quickGroups(
+    @CurrentSession() s: Session,
+    @Query('branchId') branchId: string,
+  ) {
+    return this.catalog.quickGroups(s, branchId);
+  }
+  @Get('settings') @RequirePermissions('sales.access') settings(
+    @CurrentSession() s: Session,
+    @Query('branchId') branchId: string,
+  ) {
+    return this.catalog.settings(s, branchId);
+  }
+  @Get('category/:categoryId') @RequirePermissions('sales.access') category(
+    @CurrentSession() s: Session,
+    @Param('categoryId') categoryId: string,
+    @Query('branchId') branchId: string,
+  ) {
+    return this.catalog.category(s, branchId, categoryId);
+  }
+  @Get('quick-group/:groupId') @RequirePermissions('sales.access') quickGroup(
+    @CurrentSession() s: Session,
+    @Param('groupId') groupId: string,
+    @Query('branchId') branchId: string,
+  ) {
+    return this.catalog.quickGroup(s, branchId, groupId);
   }
 }
 @Controller('sales')
@@ -686,9 +799,161 @@ class TerminalsController {
     return this.db.terminal.updateMany({ where: { id, companyId: s.companyId }, data: d });
   }
 }
+
+@Controller('cash-sessions')
+export class CashSessionsController {
+  constructor(private db: PrismaService) {}
+  private userBranchWhere(s: Session, userId: string, branchId?: string) {
+    return {
+      companyId: s.companyId,
+      active: true,
+      deletedAt: null,
+      ...(branchId ? { id: branchId } : {}),
+      ...(s.roles.includes('SUPER_ADMIN') && userId === s.sub
+        ? {}
+        : { OR: [{ users: { some: { id: userId } } }, { userAccesses: { some: { userId } } }] }),
+    };
+  }
+  private async branch(s: Session, branchId: string) {
+    if (s.branchId && s.branchId !== branchId) throw new BadRequestException('Sucursal inválida');
+    const branch = await this.db.branch.findFirst({
+      where: this.userBranchWhere(s, s.sub, branchId),
+      select: { id: true, name: true },
+    });
+    if (!branch) throw new BadRequestException('Sucursal inválida');
+    return branch;
+  }
+  @Get('branches') @RequirePermissions('sales.access') branches(@CurrentSession() s: Session) {
+    return this.db.branch.findMany({
+      where: { ...this.userBranchWhere(s, s.sub), ...(s.branchId ? { id: s.branchId } : {}) },
+      orderBy: { name: 'asc' },
+    });
+  }
+  @Get('bootstrap') @RequirePermissions('sales.access') async bootstrap(
+    @CurrentSession() s: Session,
+    @Query('branchId') branchId: string,
+  ) {
+    const branch = await this.branch(s, branchId);
+    const [terminals, cashiers] = await Promise.all([
+      this.db.terminal.findMany({ where: { companyId: s.companyId, branchId, active: true }, orderBy: { name: 'asc' } }),
+      this.db.user.findMany({
+        where: {
+          companyId: s.companyId,
+          active: true,
+          deletedAt: null,
+          ...(!s.roles.includes('SUPER_ADMIN') && !s.permissions.includes('sales.authorizeDiscount') ? { id: s.sub } : {}),
+          OR: [{ branchId }, { branchAccesses: { some: { branchId } } }],
+        },
+        select: { id: true, firstName: true, lastName: true, username: true },
+        orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+      }),
+    ]);
+    return { branch, terminals, cashiers };
+  }
+  @Get('current') @RequirePermissions('sales.access') async current(
+    @CurrentSession() s: Session,
+    @Query('terminalId') terminalId: string,
+  ) {
+    const current = await this.db.cashSession.findFirst({
+      where: { companyId: s.companyId, terminalId, status: 'OPEN' },
+      include: { cashier: { select: { id: true, firstName: true, lastName: true, username: true } }, terminal: true },
+      orderBy: { openedAt: 'desc' },
+    });
+    if (current) await this.branch(s, current.branchId);
+    return current;
+  }
+  @Post('open') @RequirePermissions('cashSessions.open') async open(
+    @CurrentSession() s: Session,
+    @Body() dto: OpenCashSessionDto,
+  ) {
+    await this.branch(s, dto.branchId);
+    if (dto.cashierUserId !== s.sub && !s.roles.includes('SUPER_ADMIN') && !s.permissions.includes('sales.authorizeDiscount'))
+      throw new BadRequestException('No puede abrir caja para otro cajero');
+    let terminal = dto.terminalId
+      ? await this.db.terminal.findFirst({ where: { id: dto.terminalId, companyId: s.companyId, branchId: dto.branchId, active: true } })
+      : null;
+    if (!terminal) {
+      if (dto.terminalId) throw new BadRequestException('Terminal inválida');
+      const count = await this.db.terminal.count({ where: { companyId: s.companyId, branchId: dto.branchId } });
+      terminal = await this.db.terminal.create({ data: { companyId: s.companyId, branchId: dto.branchId, code: `CAJA-${count + 1}`, name: dto.terminalName?.trim() || `Caja ${count + 1}` } });
+    }
+    const cashier = await this.db.user.findFirst({
+      where: { id: dto.cashierUserId, companyId: s.companyId, active: true, deletedAt: null, OR: [{ branchId: dto.branchId }, { branchAccesses: { some: { branchId: dto.branchId } } }] },
+    });
+    if (!terminal || !cashier)
+      throw new BadRequestException('Terminal o cajero inválido');
+    const existing = await this.db.cashSession.findFirst({ where: { terminalId: terminal.id, status: 'OPEN' } });
+    if (existing) throw new BadRequestException('La terminal ya tiene una caja abierta');
+    return this.db.$transaction(async (tx) => {
+      const opened = await tx.cashSession.create({
+        data: { companyId: s.companyId, branchId: dto.branchId, terminalId: terminal.id, cashierUserId: dto.cashierUserId, openedByUserId: s.sub, openingAmount: dto.openingAmount },
+        include: { cashier: { select: { id: true, firstName: true, lastName: true, username: true } }, terminal: true },
+      });
+      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: dto.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: opened.id, action: 'CASH_SESSION_OPENED', metadata: { openingAmount: String(dto.openingAmount), terminalId: terminal.id, cashierUserId: dto.cashierUserId } } });
+      return opened;
+    });
+  }
+  @Post('close') @RequirePermissions('cashSessions.close') async close(
+    @CurrentSession() s: Session,
+    @Body() dto: CloseCashSessionDto,
+  ) {
+    const current = await this.db.cashSession.findFirst({
+      where: { id: dto.cashSessionId, companyId: s.companyId, status: 'OPEN' },
+      include: { terminal: true, cashier: { select: { id: true, firstName: true, lastName: true, username: true } } },
+    });
+    if (!current) throw new NotFoundException('La caja ya está cerrada o no existe');
+    await this.branch(s, current.branchId);
+    if (current.cashierUserId !== s.sub && !s.roles.includes('SUPER_ADMIN') && !s.permissions.includes('sales.authorizeDiscount'))
+      throw new BadRequestException('No puede cerrar la caja de otro cajero');
+    return this.db.$transaction(async (tx) => {
+      const closed = await tx.cashSession.update({
+        where: { id: current.id },
+        data: { status: 'CLOSED', closingAmount: dto.closingAmount, closingNote: dto.closingNote?.trim() || null, closedAt: new Date(), closedByUserId: s.sub },
+        include: { terminal: true, cashier: { select: { id: true, firstName: true, lastName: true, username: true } } },
+      });
+      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: current.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: current.id, action: 'CASH_SESSION_CLOSED', metadata: { openingAmount: String(current.openingAmount), closingAmount: String(dto.closingAmount), terminalId: current.terminalId, cashierUserId: current.cashierUserId } } });
+      return closed;
+    });
+  }
+}
+
+@Controller('pos-quick-groups')
+class PosQuickGroupsController {
+  constructor(private db: PrismaService) {}
+  @Get() @RequirePermissions('branches.settings') list(@CurrentSession() s: Session, @Query('branchId') branchId: string) {
+    return this.db.posQuickGroup.findMany({ where: { companyId: s.companyId, branchId }, include: { items: { orderBy: { sortOrder: 'asc' }, include: { product: { select: { id: true, name: true, internalCode: true } } } } }, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] });
+  }
+  private async save(s: Session, dto: QuickGroupDto, id?: string) {
+    if (s.branchId && s.branchId !== dto.branchId) throw new BadRequestException('Sucursal inválida');
+    const [branch, productCount] = await Promise.all([
+      this.db.branch.count({ where: { id: dto.branchId, companyId: s.companyId, active: true, deletedAt: null } }),
+      this.db.product.count({ where: { id: { in: dto.productIds }, companyId: s.companyId, active: true, deletedAt: null, branchConfigs: { some: { branchId: dto.branchId, enabled: true } } } }),
+    ]);
+    if (!branch || productCount !== new Set(dto.productIds).size) throw new BadRequestException('Sucursal o productos inválidos');
+    return this.db.$transaction(async (tx) => {
+      const group = id
+        ? await tx.posQuickGroup.update({ where: { id }, data: { name: dto.name, icon: dto.icon, sortOrder: dto.sortOrder ?? 0, buttonSize: dto.buttonSize ?? 'MEDIUM', active: dto.active ?? true } })
+        : await tx.posQuickGroup.create({ data: { companyId: s.companyId, branchId: dto.branchId, name: dto.name, icon: dto.icon, sortOrder: dto.sortOrder ?? 0, buttonSize: dto.buttonSize ?? 'MEDIUM', active: dto.active ?? true } });
+      if (id) await tx.posQuickGroupItem.deleteMany({ where: { groupId: id } });
+      if (dto.productIds.length) await tx.posQuickGroupItem.createMany({ data: dto.productIds.map((productId, sortOrder) => ({ groupId: group.id, productId, sortOrder })) });
+      return group;
+    });
+  }
+  @Post() @RequirePermissions('branches.settings') create(@CurrentSession() s: Session, @Body() dto: QuickGroupDto) { return this.save(s, dto); }
+  @Patch(':id') @RequirePermissions('branches.settings') async update(@CurrentSession() s: Session, @Param('id') id: string, @Body() dto: QuickGroupDto) {
+    const owned = await this.db.posQuickGroup.findFirst({ where: { id, companyId: s.companyId, branchId: dto.branchId } });
+    if (!owned) throw new NotFoundException('Grupo no encontrado');
+    return this.save(s, dto, id);
+  }
+  @Delete(':id') @RequirePermissions('branches.settings') async remove(@CurrentSession() s: Session, @Param('id') id: string) {
+    const result = await this.db.posQuickGroup.deleteMany({ where: { id, companyId: s.companyId } });
+    if (!result.count) throw new NotFoundException('Grupo no encontrado');
+    return result;
+  }
+}
 @Module({
   imports: [StockModule],
-  controllers: [PosController, SalesController, PaymentMethodsController, TerminalsController],
+  controllers: [PosController, SalesController, PaymentMethodsController, TerminalsController, CashSessionsController, PosQuickGroupsController],
   providers: [SalesService, PriceResolutionService, PosCatalogService],
 })
 export class SalesModule {}

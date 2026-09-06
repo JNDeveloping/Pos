@@ -86,7 +86,7 @@ export function Roles() {
                 <td>{role._count.users}</td>
                 <td>{role.code === 'SUPER_ADMIN' ? 'Todos' : role.permissions.length}</td>
                 <td>
-                  {role.systemRole ? <span className="badge bg-blue-50 text-blue-700">Sistema</span> : 'Personalizado'}
+                  {role.systemRole ? <span className="badge bg-brand-50 text-brand-700">Sistema</span> : 'Personalizado'}
                 </td>
                 <td>{role.active ? 'Activo' : 'Inactivo'}</td>
                 <td>

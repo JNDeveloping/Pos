@@ -3,7 +3,10 @@ import {
   Banknote,
   Barcode,
   Calculator,
+  ChevronRight,
   Expand,
+  LayoutDashboard,
+  Power,
   Minus,
   Pause,
   Plus,
@@ -24,21 +27,39 @@ import {
   type PosProduct,
 } from '../lib/pos-cart';
 import type { Branch } from './Branches';
-import { loadPosSettings } from '../lib/pos-settings';
+import { DEFAULT_POS_SETTINGS, type PosSettings } from '../lib/pos-settings';
+import { appPath } from '../lib/navigation';
+import { API } from '../lib/api';
 
 type Method = { id: string; code: string; name: string; requiresReference: boolean; active?: boolean };
 type Terminal = { id: string; name: string; code: string; branchId: string; active?: boolean };
+type QuickGroup = { id: string; name: string; icon?: string; buttonSize?: string; kind?: 'GROUP' | 'CATEGORY' };
+type Cashier = { id: string; firstName: string; lastName: string; username: string };
+type CashSession = { id: string; terminalId: string; cashierUserId: string; openingAmount: string; terminal: Terminal; cashier: Cashier };
+type PosAppearance = { background?: string; backgroundOpacity?: number; backgroundOverlay?: string; backgroundBlur?: number; backgroundPosition?: string };
 type Suspended = { id: string; at: string; cart: CartLine[] };
-type Modal = 'help' | 'search' | 'edit' | 'discount' | 'suspended' | 'utilities' | 'payment' | null;
+type Modal = 'help' | 'search' | 'edit' | 'discount' | 'suspended' | 'utilities' | 'payment' | 'closeCash' | null;
 const money = (value: number) => value.toLocaleString('es-AR', { style: 'currency', currency: 'ARS' });
 const quantity = (line: CartLine) =>
   line.isWeighted ? `${line.quantity.toLocaleString('es-AR', { minimumFractionDigits: 3 })} kg` : String(line.quantity);
+const quickIcon = (name: string) => {
+  const normalized = name.toLocaleLowerCase('es-AR');
+  if (normalized.includes('pan')) return '🥖';
+  if (normalized.includes('frut') || normalized.includes('verd')) return '🍎';
+  if (normalized.includes('carb')) return '🔥';
+  if (normalized.includes('beb')) return '🥤';
+  if (normalized.includes('láct') || normalized.includes('lact')) return '🥛';
+  return '◉';
+};
 
-export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; branchId?: string }) {
+export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branches: Branch[]; branchId?: string; onBranchChange: (branchId: string) => void }) {
   const scanner = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PosProduct[]>([]);
   const [favorites, setFavorites] = useState<PosProduct[]>([]);
+  const [quickGroups, setQuickGroups] = useState<QuickGroup[]>([]);
+  const [quickProducts, setQuickProducts] = useState<PosProduct[]>([]);
+  const [activeQuickGroup, setActiveQuickGroup] = useState('favorites');
   const [cart, setCart] = useState<CartLine[]>(() => {
     try {
       return JSON.parse(sessionStorage.getItem('pos-cart') ?? '[]') as CartLine[];
@@ -50,6 +71,15 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
   const [methods, setMethods] = useState<Method[]>([]);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [terminalId, setTerminalId] = useState('');
+  const [cashSession, setCashSession] = useState<CashSession>();
+  const [cashiers, setCashiers] = useState<Cashier[]>([]);
+  const [cashierId, setCashierId] = useState(() => sessionStorage.getItem('pos-cashier-id') ?? me.user.id);
+  const [openingAmount, setOpeningAmount] = useState('0');
+  const [closingAmount, setClosingAmount] = useState('0');
+  const [closingNote, setClosingNote] = useState('');
+  const [setupReady, setSetupReady] = useState(false);
+  const [settings, setSettings] = useState<PosSettings>(DEFAULT_POS_SETTINGS);
+  const [appearance, setAppearance] = useState<PosAppearance>({});
   const [modal, setModal] = useState<Modal>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error' | 'info'; text: string }>();
@@ -64,18 +94,7 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
     }
   });
   const branch = branches.find((item) => item.id === branchId) ?? branches[0];
-  const settings = loadPosSettings(branch?.id);
-  const appearance = (() => {
-    try {
-      return JSON.parse(localStorage.getItem('system-preferences') ?? '{}') as {
-        background?: string;
-        backgroundOpacity?: number;
-        backgroundBlur?: number;
-      };
-    } catch {
-      return {};
-    }
-  })();
+  const canOpenAdmin = hasPermission(me, 'panels.admin');
   const selected = cart.find((line) => line.id === selectedId);
   const subtotal = useMemo(() => cart.reduce((sum, line) => sum + linePrice(line) * line.quantity, 0), [cart]);
   const total = useMemo(() => cart.reduce((sum, line) => sum + lineSubtotal(line), 0), [cart]);
@@ -84,26 +103,41 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
 
   useEffect(() => {
     if (!branch) return;
+    setSetupReady(false);
+    setCashSession(undefined);
     Promise.all([
       api<Method[]>('/payment-methods'),
-      api<Terminal[]>('/terminals'),
+      api<{ terminals: Terminal[]; cashiers: Cashier[] }>(`/cash-sessions/bootstrap?branchId=${branch.id}`),
       api<PosProduct[]>(`/pos/products/favorites?branchId=${branch.id}`),
+      api<QuickGroup[]>(`/pos/products/quick-groups?branchId=${branch.id}`),
+      api<{ appearance?: PosAppearance; pos?: PosSettings }>(`/pos/products/settings?branchId=${branch.id}`),
     ])
-      .then(([paymentMethods, availableTerminals, favoriteProducts]) => {
+      .then(async ([paymentMethods, bootstrap, favoriteProducts, groups, serverSettings]) => {
         setMethods(paymentMethods.filter((item) => item.active !== false));
-        const branchTerminals = availableTerminals.filter(
-          (item) => item.active !== false && item.branchId === branch.id,
-        );
+        const branchTerminals = bootstrap.terminals.filter((item) => item.active !== false);
         setTerminals(branchTerminals);
-        setTerminalId((current) =>
-          branchTerminals.some((item) => item.id === current) ? current : (branchTerminals[0]?.id ?? ''),
-        );
+        setCashiers(bootstrap.cashiers);
+        setCashierId((current) => bootstrap.cashiers.some((cashier) => cashier.id === current) ? current : (bootstrap.cashiers[0]?.id ?? me.user.id));
+        const remembered = sessionStorage.getItem('pos-terminal-id');
+        const nextTerminal = branchTerminals.find((item) => item.id === remembered)?.id ?? branchTerminals[0]?.id ?? '';
+        setTerminalId(nextTerminal);
+        if (nextTerminal) {
+          const current = await api<CashSession | null>(`/cash-sessions/current?terminalId=${nextTerminal}`);
+          if (current) { setCashSession(current); setCashierId(current.cashierUserId); }
+        }
+        setSettings({ ...DEFAULT_POS_SETTINGS, ...serverSettings.pos });
+        setAppearance(serverSettings.appearance ?? {});
         setFavorites(favoriteProducts);
+        setQuickProducts(favoriteProducts);
+        setQuickGroups(groups);
+        setActiveQuickGroup('favorites');
         setOnline(true);
+        setSetupReady(true);
       })
       .catch((error: Error) => {
         setOnline(false);
         setMessage({ kind: 'error', text: error.message });
+        setSetupReady(true);
       });
   }, [branch?.id]);
   useEffect(() => {
@@ -194,6 +228,50 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
     [add, branch],
   );
 
+  const openQuickGroup = async (groupId: string) => {
+    if (!branch || busy) return;
+    setActiveQuickGroup(groupId);
+    if (groupId === 'favorites') {
+      setQuickProducts(favorites);
+      return;
+    }
+    setBusy(true);
+    try {
+      const group = quickGroups.find((item) => item.id === groupId);
+      const path = group?.kind === 'GROUP' ? 'quick-group' : 'category';
+      setQuickProducts(await api<PosProduct[]>(`/pos/products/${path}/${groupId}?branchId=${branch.id}`));
+    } catch (error) {
+      setMessage({ kind: 'error', text: (error as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openCash = async () => {
+    if (!branch || !cashierId) return;
+    setBusy(true); setMessage(undefined);
+    try {
+      const opened = await api<CashSession>('/cash-sessions/open', {
+        method: 'POST',
+        body: JSON.stringify({ branchId: branch.id, terminalId: terminalId || undefined, terminalName: 'Caja 1', cashierUserId: cashierId, openingAmount: Number(openingAmount || 0) }),
+      });
+      setCashSession(opened); setTerminalId(opened.terminalId); setTerminals((current) => current.some((item) => item.id === opened.terminal.id) ? current : [...current, opened.terminal]);
+      sessionStorage.setItem('pos-terminal-id', opened.terminalId); sessionStorage.setItem('pos-cashier-id', opened.cashierUserId);
+      setMessage({ kind: 'ok', text: `Caja abierta en ${opened.terminal.name}` }); focusScanner();
+    } catch (error) { setMessage({ kind: 'error', text: (error as Error).message }); }
+    finally { setBusy(false); }
+  };
+  const closeCash = async () => {
+    if (!cashSession || cart.length) return;
+    setBusy(true); setMessage(undefined);
+    try {
+      await api('/cash-sessions/close', { method: 'POST', body: JSON.stringify({ cashSessionId: cashSession.id, closingAmount: Number(closingAmount || 0), closingNote: closingNote || undefined }) });
+      setCashSession(undefined); setModal(null); setClosingAmount('0'); setClosingNote('');
+      setMessage({ kind: 'ok', text: 'Caja cerrada correctamente. Podés abrir una nueva caja cuando la necesites.' });
+    } catch (error) { setMessage({ kind: 'error', text: (error as Error).message }); }
+    finally { setBusy(false); }
+  };
+
   const removeSelected = useCallback(() => {
     if (!selectedId) return;
     const line = cart.find((item) => item.id === selectedId);
@@ -269,12 +347,15 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
     return () => removeEventListener('keydown', handler);
   }, [add, cart.length, focusScanner, modal, openEdit, removeSelected, selected, suspend]);
 
+  const backgroundUrl = appearance.background
+    ? appearance.background.startsWith('/api') ? `${API.replace(/\/api$/, '')}${appearance.background}` : appearance.background
+    : undefined;
   if (ticket)
     return (
       <Ticket
         sale={ticket}
         branch={branch}
-        cashier={`${me.user.firstName} ${me.user.lastName}`}
+        cashier={cashSession ? `${cashSession.cashier.firstName} ${cashSession.cashier.lastName}` : `${me.user.firstName} ${me.user.lastName}`}
         next={() => {
           setTicket(undefined);
           setCart([]);
@@ -288,20 +369,25 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
       style={
         appearance.background
           ? ({
-              '--pos-background': `url(${appearance.background})`,
+              '--pos-background': `url(${backgroundUrl})`,
               '--pos-overlay': String((appearance.backgroundOpacity ?? 20) / 100),
               '--pos-blur': `${appearance.backgroundBlur ?? 0}px`,
+              '--pos-background-position': appearance.backgroundPosition ?? 'center',
             } as React.CSSProperties)
           : undefined
       }
     >
       <header className="pos-header">
-        <div>
-          <b>EL RINCÓN POS</b>
-          <span>
+        <div className="pos-brand-block">
+          <span className="pos-brand-mark"><ShoppingCart /></span>
+          <span><b>EL RINCÓN</b><small>CAJA RÁPIDA</small></span>
+        </div>
+        <div className="pos-session-chip">
+          <span className={cashSession ? 'open' : ''} />
+          <div><b>{cashSession ? 'Caja abierta' : 'Caja sin abrir'}</b><small>
             {branch?.name ?? 'Sin sucursal'} ·{' '}
             {terminals.find((item) => item.id === terminalId)?.name ?? 'Sin terminal'}
-          </span>
+          </small></div>
         </div>
         <div className="pos-head-meta">
           <span>
@@ -316,9 +402,30 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
           <button title="Pantalla completa" onClick={() => void document.documentElement.requestFullscreen()}>
             <Expand size={18} />
           </button>
-          <a href="/pos/admin">Administración</a>
+          {cashSession && hasPermission(me, 'cashSessions.close') && <button className="pos-close-cash" title="Cerrar caja" onClick={() => { if (cart.length) setMessage({ kind: 'error', text: 'Terminá o cancelá la venta antes de cerrar la caja.' }); else setModal('closeCash'); }}><Power size={18}/><span>CERRAR CAJA</span></button>}
+          {canOpenAdmin && (
+            <a className="pos-admin-link" href={appPath('/admin')} title="Abrir centro de administración">
+              <LayoutDashboard size={18} /> <span>ADMIN</span>
+            </a>
+          )}
+          <a className="pos-admin-link" href={appPath('/cashier')} title="Abrir herramientas autorizadas de caja">
+            <LayoutDashboard size={18} /> <span>HERRAMIENTAS</span>
+          </a>
         </div>
       </header>
+      {setupReady && !cashSession && (
+        <div className="pos-opening-backdrop">
+          <section className="pos-opening-card">
+            <div><p className="eyebrow">INICIO RÁPIDO</p><h1>Abrir caja</h1><p>Elegí dónde y con quién vas a operar. Se recordará durante esta sesión.</p></div>
+            <label>Sucursal habilitada<select value={branch?.id ?? ''} onChange={(event) => onBranchChange(event.target.value)}>{branches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>Sólo se muestran las sucursales habilitadas para tu usuario.</small></label>
+            <label>Cajero<select value={cashierId} onChange={(event) => setCashierId(event.target.value)}>{cashiers.map((cashier) => <option key={cashier.id} value={cashier.id}>{cashier.firstName} {cashier.lastName} · {cashier.username}</option>)}</select></label>
+            <label>Terminal<select value={terminalId} onChange={(event) => setTerminalId(event.target.value)}><option value="">Crear Caja 1 ahora</option>{terminals.map((terminal) => <option key={terminal.id} value={terminal.id}>{terminal.name}</option>)}</select></label>
+            <label>Fondo inicial<input inputMode="decimal" type="number" min="0" step="0.01" value={openingAmount} onChange={(event) => setOpeningAmount(event.target.value)} /></label>
+            {message?.kind === 'error' && <p className="pos-feedback error">{message.text}</p>}
+            {hasPermission(me, 'cashSessions.open') ? <button className="pos-open-button" disabled={busy || !branch || !cashierId} onClick={() => void openCash()}>{busy ? 'Abriendo…' : 'Dar de alta y abrir caja'}</button> : <p className="pos-feedback error">Tu rol no tiene permiso para dar de alta una caja.</p>}
+          </section>
+        </div>
+      )}
       <main className="pos-grid">
         <section className="pos-cart">
           <div className="pos-search">
@@ -336,19 +443,30 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
             </button>
           </div>
           {message && <div className={`pos-feedback ${message.kind}`}>{message.text}</div>}
-          {!!favorites.length && (
-            <div
-              className="pos-favorites"
-              style={{ gridTemplateColumns: `repeat(${settings.favoriteColumns}, minmax(120px, 1fr))` }}
-              aria-label="Accesos rápidos"
-            >
-              {favorites.map((product) => (
-                <button key={product.id} onClick={() => add(product)}>
-                  <span>{product.shortName || product.name}</span>
-                  <b>{money(Number(product.price))}</b>
+          {(quickGroups.length > 0 || favorites.length > 0) && (
+            <section className="pos-quick-access" aria-label="Accesos rápidos por categoría">
+              <div className="pos-quick-groups">
+                <button className={activeQuickGroup === 'favorites' ? 'active' : ''} onClick={() => void openQuickGroup('favorites')}>
+                  <span>★</span><b>Accesos rápidos</b>
                 </button>
-              ))}
-            </div>
+                {quickGroups.map((group) => (
+                  <button className={activeQuickGroup === group.id ? 'active' : ''} key={group.id} onClick={() => void openQuickGroup(group.id)}>
+                    <span>{group.icon || quickIcon(group.name)}</span><b>{group.name}</b><ChevronRight size={14} />
+                  </button>
+                ))}
+              </div>
+              {!!quickProducts.length && (
+                <div className={`pos-quick-products size-${quickGroups.find((group) => group.id === activeQuickGroup)?.buttonSize?.toLowerCase() ?? 'medium'}`} style={{ gridTemplateColumns: `repeat(${settings.favoriteColumns}, minmax(130px, 1fr))` }}>
+                  {quickProducts.map((product) => (
+                    <button key={product.id} onClick={() => add(product)}>
+                      <small>{product.category ?? 'Rápido'}</small>
+                      <span>{product.shortName || product.name}</span>
+                      <b>{money(Number(product.price))}</b>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
           )}
           <div className="pos-table-head">
             <span>Producto</span>
@@ -477,7 +595,7 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
           </div>
           <button
             className="pos-pay"
-            disabled={!cart.length || !terminalId || !online}
+            disabled={!cart.length || !terminalId || !cashSession || !online}
             onClick={() => setModal('payment')}
           >
             <Banknote /> COBRAR <kbd>F4</kbd>
@@ -502,7 +620,7 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
               <X /> Cancelar
             </button>
           </div>
-          {!terminalId && <p className="pos-warning">No hay una terminal activa para esta sucursal.</p>}
+          {!cashSession && <p className="pos-warning">Abra una caja para comenzar a vender.</p>}
         </aside>
       </main>
       {modal === 'search' && (
@@ -603,6 +721,7 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
                   operationId: crypto.randomUUID(),
                   branchId: branch.id,
                   terminalId,
+                  cashSessionId: cashSession?.id,
                   items: cart.map((line) => ({
                     productId: line.id,
                     quantity: line.quantity,
@@ -625,6 +744,7 @@ export function Pos({ me, branches, branchId }: { me: Me; branches: Branch[]; br
           }}
         />
       )}
+      {modal === 'closeCash' && cashSession && <ModalFrame title="Dar de baja y cerrar caja" close={() => setModal(null)}><div className="pos-form"><div className="cash-close-summary"><span>Terminal<b>{cashSession.terminal.name}</b></span><span>Fondo inicial<b>{money(Number(cashSession.openingAmount))}</b></span></div><label>Efectivo contado al cierre<input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={closingAmount} onChange={(event) => setClosingAmount(event.target.value)}/></label><label>Observación opcional<textarea value={closingNote} onChange={(event) => setClosingNote(event.target.value)} placeholder="Diferencias, retiro, observaciones…"/></label><p className="pos-feedback info">Esta acción deja la caja cerrada y registra el responsable en Auditoría.</p><button className="pos-close-confirm" disabled={busy || cart.length > 0 || Number(closingAmount) < 0} onClick={() => void closeCash()}>{busy ? 'Cerrando…' : 'Confirmar cierre de caja'}</button></div></ModalFrame>}
     </div>
   );
 }
@@ -734,7 +854,7 @@ function EditModal({
   close: () => void;
   save: (v: { quantity: number; manualPrice?: number }) => void;
 }) {
-  const [qty, setQty] = useState(line && 'quantity' in line ? line.quantity : line?.isWeighted ? 0 : 1),
+  const [qty, setQty] = useState(String(line && 'quantity' in line ? line.quantity : line?.isWeighted ? '' : 1)),
     [price, setPrice] = useState(line ? linePrice(line as CartLine) : 0);
   if (!line) return null;
   return (
@@ -743,7 +863,7 @@ function EditModal({
         className="pos-form"
         onSubmit={(e) => {
           e.preventDefault();
-          save({ quantity: qty, manualPrice: price !== Number(line.price) ? price : undefined });
+          save({ quantity: Number(qty), manualPrice: price !== Number(line.price) ? price : undefined });
         }}
       >
         <h3>{line.name}</h3>
@@ -755,9 +875,14 @@ function EditModal({
             min={line.isWeighted ? '.001' : '1'}
             step={line.isWeighted ? '.001' : '1'}
             value={qty}
-            onChange={(e) => setQty(Number(e.target.value))}
+            onChange={(e) => setQty(e.target.value)}
           />
         </label>
+        <div className="pos-number-pad" aria-label="Teclado numérico">
+          {['1', '2', '3', '4', '5', '6', '7', '8', '9', line.isWeighted ? '.' : '00', '0', '⌫'].map((key) => (
+            <button type="button" key={key} onClick={() => setQty((current) => key === '⌫' ? current.slice(0, -1) : key === '.' && current.includes('.') ? current : `${current}${key}`)}>{key}</button>
+          ))}
+        </div>
         <label>
           Precio unitario
           <input
@@ -768,9 +893,9 @@ function EditModal({
           />
         </label>
         <p>
-          Subtotal estimado <b>{money(qty * price)}</b>
+          Subtotal estimado <b>{money(Number(qty) * price)}</b>
         </p>
-        <button className="pos-pay" disabled={qty <= 0}>
+        <button className="pos-pay" disabled={Number(qty) <= 0}>
           CONFIRMAR
         </button>
       </form>

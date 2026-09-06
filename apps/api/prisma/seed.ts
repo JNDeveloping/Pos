@@ -72,7 +72,7 @@ async function main() {
     });
   }
   await db.rolePermission.createMany({
-    data: ['sales.access', 'sales.create', 'sales.view', 'terminals.view', 'paymentMethods.view'].map((code) => ({
+    data: ['panels.cashier', 'sales.access', 'cashSessions.open', 'cashSessions.close', 'sales.create', 'sales.view', 'terminals.view', 'paymentMethods.view'].map((code) => ({
       roleId: roles[3].id,
       permissionId: permissionByCode.get(code)!,
     })),
@@ -94,6 +94,11 @@ async function main() {
     where: { userId_roleId: { userId: admin.id, roleId: roles[0].id } },
     update: {},
     create: { userId: admin.id, roleId: roles[0].id },
+  });
+  await db.userBranchAccess.upsert({
+    where: { userId_branchId: { userId: admin.id, branchId: principalBranch.id } },
+    update: { companyId: company.id },
+    create: { userId: admin.id, branchId: principalBranch.id, companyId: company.id },
   });
   const names = [
     'Almacén',

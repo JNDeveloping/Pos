@@ -37,6 +37,11 @@ import { Pos } from './pages/Pos';
 import { SalesAdmin } from './pages/SalesAdmin';
 import { SaleDetail } from './pages/SaleDetail';
 import { PosSettingsPage } from './pages/PosSettings';
+import { CashierLayout } from './components/CashierLayout';
+import { CashierHome } from './pages/CashierHome';
+import { OwnerMonitor } from './pages/OwnerMonitor';
+import { MobileAdmin } from './pages/MobileAdmin';
+import { shouldOpenMobileAdmin } from './lib/mobile-admin';
 const pages: Record<string, React.ReactNode> = {
   '/admin': <Dashboard />,
   '/branches': <Branches />,
@@ -82,6 +87,26 @@ const pages: Record<string, React.ReactNode> = {
   '/admin/pos-settings': <PosSettingsPage />,
 };
 const routePermissions: Record<string, string> = {
+  '/admin': 'dashboard.view',
+  '/admin/mobile': 'products.view',
+  '/owner': 'dashboard.view',
+  '/products': 'products.view',
+  '/admin/products': 'products.view',
+  '/catalog': 'products.view',
+  '/admin/catalog': 'products.view',
+  '/labels': 'labels.view',
+  '/admin/labels': 'labels.view',
+  '/branches': 'branches.view',
+  '/users': 'users.view',
+  '/audit': 'audit.view',
+  '/admin/audit': 'audit.view',
+  '/settings': 'branches.settings',
+  '/categories': 'categories.view',
+  '/brands': 'brands.view',
+  '/cashier/products': 'products.view',
+  '/cashier/stock': 'stock.view',
+  '/cashier/sales': 'sales.view',
+  '/cashier/labels': 'labels.view',
   '/suppliers': 'suppliers.view',
   '/admin/suppliers': 'suppliers.view',
   '/purchases': 'purchases.view',
@@ -154,13 +179,18 @@ export default function App() {
         branchContext.set(nextBranchId);
       };
       try {
-        apply((await api<Branch[]>('/branches')).filter((branch) => branch.active));
+        const endpoint = hasPermission(me, 'branches.view') ? '/branches' : '/cash-sessions/branches';
+        apply((await api<Branch[]>(endpoint)).filter((branch) => branch.active));
       } catch {
         // The global connection indicator explains the temporary API outage.
       }
     }
     void configureBranch();
   }, [me]);
+  useEffect(() => {
+    if (me && hasPermission(me, 'panels.admin') && shouldOpenMobileAdmin(route))
+      window.location.replace(`${import.meta.env.BASE_URL}admin/mobile`);
+  }, [me, route]);
   if (!ready)
     return <div className="grid min-h-screen place-items-center text-brand-700">Preparando este dispositivo…</div>;
   if (!me || route === '/login')
@@ -170,7 +200,8 @@ export default function App() {
         <PwaManager />
       </>
     );
-  const productMatch = route.match(/^\/(?:admin\/)?products\/([0-9a-f-]{36})$/i);
+  const cashierRoute = route === '/cashier' || route.startsWith('/cashier/');
+  const productMatch = route.match(/^\/(?:admin\/|cashier\/)?products\/([0-9a-f-]{36})$/i);
   const supplierMatch = route.match(/^\/(?:admin\/)?suppliers\/([0-9a-f-]{36})$/i);
   const branchMatch = route.match(/^\/(?:admin\/)?branches\/([0-9a-f-]{36})$/i);
   const roleMatch = route.match(/^\/(?:admin\/)?roles\/([0-9a-f-]{36})$/i);
@@ -179,7 +210,9 @@ export default function App() {
   const saleMatch = route.match(/^\/admin\/sales\/([0-9a-f-]{36})$/i);
   const requiredPermission =
     routePermissions[route] ??
-    (supplierMatch
+    (productMatch
+      ? 'products.view'
+      : supplierMatch
       ? 'suppliers.view'
       : roleMatch
         ? 'roles.view'
@@ -190,16 +223,19 @@ export default function App() {
             : saleMatch
               ? 'sales.view'
               : undefined);
-  if (requiredPermission && !hasPermission(me, requiredPermission))
+  const panelPermission = route === '/' || cashierRoute ? 'panels.cashier' : 'panels.admin';
+  if (!hasPermission(me, panelPermission) || (requiredPermission && !hasPermission(me, requiredPermission)))
     return (
-      <Layout me={me} branches={branches} currentBranchId={currentBranchId} onBranchChange={async () => {}}>
+      <div className="grid min-h-screen place-items-center bg-slate-100 p-4">
         <div className="card p-8">
           <h1 className="text-2xl font-bold">Acceso denegado</h1>
           <p className="mt-2 text-slate-500">
-            No tiene el permiso <code>{requiredPermission}</code> para abrir esta sección.
+            Tu rol no tiene acceso a este panel o a esta función.
           </p>
+          {hasPermission(me, 'panels.cashier') && <a className="btn-primary mt-4" href={import.meta.env.BASE_URL}>Ir al panel de caja</a>}
+          {hasPermission(me, 'panels.admin') && <a className="btn-secondary mt-4" href={import.meta.env.BASE_URL + 'admin'}>Ir al panel del dueño</a>}
         </div>
-      </Layout>
+      </div>
     );
   if (route === '/') {
     if (!hasPermission(me, 'sales.access'))
@@ -216,10 +252,16 @@ export default function App() {
       );
     return (
       <>
-        <Pos me={me} branches={branches} branchId={currentBranchId} />
+        <Pos me={me} branches={branches} branchId={currentBranchId} onBranchChange={(next) => { branchContext.set(next); setCurrentBranchId(next); }} />
         <PwaManager />
       </>
     );
+  }
+  if (route === '/owner') return <><OwnerMonitor me={me}/><PwaManager/></>;
+  if (route === '/admin/mobile') return <><MobileAdmin me={me} branches={branches} initialBranchId={currentBranchId}/><PwaManager/></>;
+  if (cashierRoute) {
+    const cashierPage = productMatch ? <ProductDetail id={productMatch[1]} /> : route === '/cashier/products' ? <Products /> : route === '/cashier/stock' ? <Stock /> : route === '/cashier/sales' ? <SalesAdmin kind="sales" /> : route === '/cashier/labels' ? <Labels /> : <CashierHome me={me} />;
+    return <><CashierLayout me={me}>{cashierPage}</CashierLayout><PwaManager /></>;
   }
   const page = productMatch ? (
     <ProductDetail id={productMatch[1]} />
@@ -235,7 +277,7 @@ export default function App() {
     <PurchaseDetail id={purchaseMatch[1]} />
   ) : saleMatch ? (
     <SaleDetail id={saleMatch[1]} me={me} />
-  ) : route === '/settings' && !me.permissions.includes('branches.settings') ? (
+  ) : route === '/settings' && !hasPermission(me, 'branches.settings') ? (
     <div className="card p-6">No tenés permiso para configurar este dispositivo.</div>
   ) : (
     (pages[route] ?? pages['/admin'])
