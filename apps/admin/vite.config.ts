@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
     [`${base}api`]: {
       target: `http://127.0.0.1:${env.PORT || '3002'}`,
       changeOrigin: true,
+      ws: true,
       rewrite: (path: string) => path.replace(new RegExp(`^${base.replace(/\/$/, '')}/api`), '/api'),
     },
   };

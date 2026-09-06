@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { appPath } from '../lib/navigation';
 type Supplier = {
   id: string;
   code: string;
@@ -31,14 +32,14 @@ export function SupplierDetail({ id }: { id: string }) {
   useEffect(() => {
     api<Supplier>(`/suppliers/${id}`)
       .then(setData)
-      .catch((e) => setMessage(String(e)));
+      .catch((e: Error) => setMessage(e.message));
   }, [id]);
   if (!data) return <div className="card p-6">{message || 'Cargando proveedor…'}</div>;
-  const tabs = ['GENERAL', 'CONTACTO', 'PRODUCTOS', 'COMPRAS', 'FACTURAS', 'CUENTA FUTURA', 'AUDITORÍA'];
+  const tabs = ['GENERAL', 'PRODUCTOS'];
   return (
     <div className="space-y-5">
       <header>
-        <a href="../suppliers" className="text-sm text-brand-700">
+        <a href={appPath('/admin/suppliers')} className="text-sm text-brand-700">
           ← Proveedores
         </a>
         <h1 className="text-2xl font-bold">{data.name}</h1>
@@ -77,11 +78,6 @@ export function SupplierDetail({ id }: { id: string }) {
               ))}
             </tbody>
           </table>
-        </div>
-      ) : tab === 'CUENTA FUTURA' ? (
-        <div className="card p-6">
-          <b>Cuenta corriente no implementada en esta etapa.</b>
-          <p className="text-slate-500">El espacio queda reservado sin inventar saldos.</p>
         </div>
       ) : (
         <div className="card grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-3">

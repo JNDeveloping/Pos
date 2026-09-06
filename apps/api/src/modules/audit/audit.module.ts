@@ -45,7 +45,7 @@ class LabelsController {
     return this.db.labelPrintQueue.findMany({
       where: { companyId: s.companyId, branchId: effectiveBranch, status: 'PENDING' },
       include: {
-        product: { select: { id: true, name: true, internalCode: true, barcodes: { take: 1, orderBy: { isPrimary: 'desc' } } } },
+        product: { select: { id: true, name: true, internalCode: true, taxRate: true, unitType: true, isWeighted: true, netContent: true, netContentUnit: true, category: { select: { name: true } }, barcodes: { take: 1, orderBy: { isPrimary: 'desc' } } } },
         user: { select: { firstName: true, lastName: true } },
         branch: { select: { name: true } },
       },

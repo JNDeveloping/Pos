@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { AlertTriangle, ArrowDownUp, Boxes, PackageCheck, Search } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, ArrowDownUp, Boxes, ChevronLeft, ChevronRight, History, PackageCheck, Search } from 'lucide-react';
 import { api } from '../lib/api';
 import { branchContext } from '../lib/branch-context';
 
@@ -15,25 +15,31 @@ type StockRow = {
   status: string;
   stockValue: number;
   product: { internalCode: string; name: string; category?: { name: string }; brand?: { name: string } };
+  branch?: { id: string; name: string };
 };
+type StockPage = { data: StockRow[]; meta: { page: number; pages: number; total: number } };
+type Movement = { id: string; type: string; quantity: string; reason?: string; createdAt: string; previousQuantity: string; newQuantity: string };
 export function Stock() {
   const [rows, setRows] = useState<StockRow[]>([]),
     [search, setSearch] = useState(''),
-    [loading, setLoading] = useState(true),
+    [loading, setLoading] = useState(true), [error, setError] = useState(''), [page, setPage] = useState(1), [pages, setPages] = useState(1), [totalRows, setTotalRows] = useState(0), [movements, setMovements] = useState<Movement[]>(),
     [adjusting, setAdjusting] = useState<StockRow>();
-  const load = async () => {
+  const load = useCallback(async (requestedPage = page) => {
     setLoading(true);
+    setError('');
     try {
-      setRows(
-        await api<StockRow[]>(`/stock?branchId=${branchContext.get() ?? ''}&search=${encodeURIComponent(search)}`),
-      );
+      const result = await api<StockPage>(`/stock?paged=true&page=${requestedPage}&branchId=${branchContext.get() ?? ''}&search=${encodeURIComponent(search)}`);
+      setRows(result.data); setPages(result.meta.pages || 1); setTotalRows(result.meta.total);
+    } catch (reason) {
+      setError((reason as Error).message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, search]);
   useEffect(() => {
-    void load();
-  }, []);
+    const timer = window.setTimeout(() => void load(page), search ? 300 : 0);
+    return () => window.clearTimeout(timer);
+  }, [load, page, search]);
   const total = rows.reduce((sum, row) => sum + row.stockValue, 0),
     low = rows.filter((x) => x.status !== 'NORMAL').length;
   return (
@@ -45,6 +51,7 @@ export function Stock() {
           <p>Existencias físicas, reservas, tránsito y valorización en una sola vista.</p>
         </div>
       </header>
+      {error && <div className="rounded-xl bg-red-50 p-4 text-red-700">{error} <button className="ml-2 underline" onClick={() => void load()}>Reintentar</button></div>}
       <div className="grid gap-4 sm:grid-cols-3">
         <StockMetric icon={<Boxes />} label="Productos controlados" value={String(rows.length)} />
         <StockMetric icon={<AlertTriangle />} label="Requieren atención" value={String(low)} />
@@ -56,14 +63,15 @@ export function Stock() {
             <Search size={17} />
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && void load()}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); void load(1); } }}
               placeholder="Producto, código o barcode"
             />
           </label>
-          <button className="btn-secondary" onClick={() => void load()}>
+          <button className="btn-secondary" onClick={() => { setPage(1); void load(1); }}>
             Buscar
           </button>
+          <button className="btn-secondary" onClick={() => void api<{ data: Movement[] }>(`/stock/movements?branchId=${branchContext.get() ?? ''}`).then((result) => setMovements(result.data)).catch((reason: Error) => setError(reason.message))}><History size={17}/>Historial</button>
         </div>
         {loading ? (
           <div className="empty-state">Cargando stock…</div>
@@ -94,7 +102,7 @@ export function Stock() {
                     <td>
                       <b>{row.product.name}</b>
                       <small className="block text-slate-500">
-                        {row.product.internalCode} · {row.product.category?.name ?? 'Sin categoría'}
+                        {row.product.internalCode} · {row.product.category?.name ?? 'Sin categoría'}{row.branch?.name ? ` · ${row.branch.name}` : ''}
                       </small>
                     </td>
                     <td>{row.quantity}</td>
@@ -118,7 +126,9 @@ export function Stock() {
             </table>
           </div>
         )}
+        <footer className="flex items-center justify-between border-t p-4 text-sm"><span>{totalRows.toLocaleString('es-AR')} productos</span><div className="flex items-center gap-3"><button disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft/></button><span>Página {page} de {pages}</span><button disabled={page >= pages} onClick={() => setPage((value) => value + 1)}><ChevronRight/></button></div></footer>
       </section>
+      {movements && <div className="modal-backdrop"><section className="modal-card max-w-3xl"><div className="flex justify-between"><div><h2>Últimos movimientos</h2><p className="text-slate-500">Historial auditable de la sucursal activa.</p></div><button onClick={() => setMovements(undefined)}>Cerrar</button></div><div className="mt-4 max-h-[60vh] divide-y overflow-y-auto">{movements.map((movement) => <article className="py-3" key={movement.id}><div className="flex justify-between"><b>{movement.type}</b><time className="text-sm text-slate-500">{new Date(movement.createdAt).toLocaleString('es-AR')}</time></div><p className="text-sm">{movement.previousQuantity} → {movement.newQuantity} · {movement.quantity} {movement.reason ? `· ${movement.reason}` : ''}</p></article>)}{!movements.length && <p className="empty-state">No hay movimientos registrados.</p>}</div></section></div>}
       {adjusting && (
         <Adjustment
           row={adjusting}
