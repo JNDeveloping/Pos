@@ -67,6 +67,16 @@ enum UnitType {
   METER
 }
 
+enum PaymentMethodKind {
+  CASH
+  DEBIT
+  CREDIT
+  TRANSFER
+  QR
+  ACCOUNT
+  OTHER
+}
+
 model Company {
   id               String            @id @default(uuid()) @db.Uuid
   name             String
@@ -447,6 +457,12 @@ enum CashSessionStatus {
   CLOSED
 }
 
+enum CashMovementKind {
+  INCOME
+  EXPENSE
+  WITHDRAWAL
+}
+
 model Terminal {
   id             String   @id @default(uuid()) @db.Uuid
   companyId      String   @db.Uuid
@@ -454,6 +470,8 @@ model Terminal {
   code           String
   name           String
   active         Boolean  @default(true)
+  printerName    String?
+  posConfig      Json?
   nextSaleNumber Int      @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -481,10 +499,28 @@ model CashSession {
   cashier        User              @relation("CashierSessions", fields: [cashierUserId], references: [id])
   closedBy       User?             @relation("ClosedCashSessions", fields: [closedByUserId], references: [id])
   sales          Sale[]
+  movements      CashMovement[]
 
   @@index([companyId, branchId, status])
   @@index([terminalId, status])
   @@index([cashierUserId, status])
+}
+
+model CashMovement {
+  id            String           @id @default(uuid()) @db.Uuid
+  companyId     String           @db.Uuid
+  branchId      String           @db.Uuid
+  cashSessionId String           @db.Uuid
+  cashSession   CashSession      @relation(fields: [cashSessionId], references: [id], onDelete: Restrict)
+  kind          CashMovementKind
+  amount        Decimal          @db.Decimal(14, 2)
+  reason        String
+  userId        String           @db.Uuid
+  origin        String           @default("POS")
+  createdAt     DateTime         @default(now())
+
+  @@index([cashSessionId, createdAt])
+  @@index([companyId, branchId, createdAt])
 }
 
 model PosQuickGroup {
@@ -520,6 +556,7 @@ model PaymentMethod {
   companyId         String    @db.Uuid
   code              String
   name              String
+  kind              PaymentMethodKind @default(OTHER)
   active            Boolean   @default(true)
   requiresReference Boolean   @default(false)
   sortOrder         Int       @default(0)
@@ -570,8 +607,8 @@ model SaleItem {
   id                  String           @id @default(uuid()) @db.Uuid
   saleId              String           @db.Uuid
   sale                Sale             @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productId           String           @db.Uuid
-  branchProductId     String           @db.Uuid
+  productId           String?          @db.Uuid
+  branchProductId     String?          @db.Uuid
   productNameSnapshot String
   barcodeSnapshot     String?
   quantity            Decimal          @db.Decimal(14, 3)
@@ -582,6 +619,7 @@ model SaleItem {
   discountAmount      Decimal          @default(0) @db.Decimal(14, 2)
   subtotal            Decimal          @db.Decimal(14, 2)
   taxRateSnapshot     Decimal          @db.Decimal(5, 2)
+  note                String?
   createdAt           DateTime         @default(now())
   returnItems         SaleReturnItem[]
 
@@ -596,6 +634,7 @@ model Payment {
   paymentMethodId String        @db.Uuid
   paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id])
   amount          Decimal       @db.Decimal(14, 2)
+  cashImpact      Decimal       @default(0) @db.Decimal(14, 2)
   receivedAmount  Decimal?      @db.Decimal(14, 2)
   changeAmount    Decimal?      @db.Decimal(14, 2)
   reference       String?
@@ -626,7 +665,7 @@ model SaleReturnItem {
   saleReturn    SaleReturn @relation(fields: [saleReturnId], references: [id], onDelete: Cascade)
   saleItemId    String     @db.Uuid
   saleItem      SaleItem   @relation(fields: [saleItemId], references: [id])
-  productId     String     @db.Uuid
+  productId     String?    @db.Uuid
   quantity      Decimal    @db.Decimal(14, 3)
   unitPrice     Decimal    @db.Decimal(14, 2)
   amount        Decimal    @db.Decimal(14, 2)

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Layout } from './components/Layout';
 import { PwaManager } from './components/PwaManager';
-import { api, hasPermission, type Me } from './lib/api';
-import { currentRoute } from './lib/navigation';
+import { api, ApiError, hasPermission, type Me } from './lib/api';
+import { appPath, currentRoute, navigate, subscribeToNavigation } from './lib/navigation';
 import { connectivityService } from './services/connectivity.service';
 import { branchContext } from './lib/branch-context';
 import { Dashboard } from './pages/Dashboard';
@@ -23,7 +23,7 @@ import { Suppliers } from './pages/Suppliers';
 import { Purchases } from './pages/Purchases';
 import { InvoiceImport } from './pages/InvoiceImport';
 import { SupplierDetail } from './pages/SupplierDetail';
-import { requestTabSession } from './lib/auth-session';
+import { clearTokens, requestTabSession, subscribeToAuthSession } from './lib/auth-session';
 import { Roles } from './pages/Roles';
 import { RoleDetail } from './pages/RoleDetail';
 import { PurchaseOrders } from './pages/PurchaseOrders';
@@ -131,7 +131,7 @@ const routePermissions: Record<string, string> = {
   '/admin/pos-settings': 'terminals.manage',
 };
 export default function App() {
-  const rawRoute = currentRoute();
+  const [rawRoute, setRawRoute] = useState(currentRoute);
   const redirects: Record<string, string> = {
     '/admin/prices': '/products?tab=pricing',
     '/admin/costs': '/products?tab=pricing',
@@ -141,14 +141,41 @@ export default function App() {
     '/admin/transfers': '/admin/stock',
     '/admin/purchase-orders': '/admin/purchases',
   };
-  if (redirects[rawRoute]) {
-    window.history.replaceState({}, '', `${import.meta.env.BASE_URL.replace(/\/$/, '')}${redirects[rawRoute]}`);
-  }
   const route = redirects[rawRoute]?.split('?')[0] ?? rawRoute;
   const [me, setMe] = useState<Me>(),
     [ready, setReady] = useState(false),
     [branches, setBranches] = useState<Branch[]>([]),
     [currentBranchId, setCurrentBranchId] = useState<string>();
+  useEffect(() => subscribeToNavigation(() => setRawRoute(currentRoute())), []);
+  useEffect(() => subscribeToAuthSession((tokens) => {
+    if (!tokens) {
+      setMe(undefined);
+      return;
+    }
+    // Login no recarga la SPA: hidrata el usuario antes de mostrar la ruta protegida.
+    if (currentRoute() === '/login') void api<Me>('/auth/me').then(setMe).catch(() => undefined);
+  }), []);
+  useEffect(() => {
+    const redirect = redirects[rawRoute];
+    if (redirect) navigate(redirect, { replace: true });
+  }, [rawRoute]);
+  useEffect(() => {
+    if (me && route === '/login')
+      navigate(hasPermission(me, 'panels.admin') ? '/owner' : '/', { replace: true });
+  }, [me, route]);
+  useEffect(() => {
+    const onClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const anchor = (event.target as Element | null)?.closest('a');
+      if (!anchor || anchor.target || anchor.download || anchor.origin !== window.location.origin) return;
+      const basePath = new URL(appPath('/'), window.location.origin).pathname;
+      if (!anchor.pathname.startsWith(basePath)) return;
+      event.preventDefault();
+      navigate(`${anchor.pathname.slice(basePath.length - 1)}${anchor.search}${anchor.hash}`);
+    };
+    document.addEventListener('click', onClick);
+    return () => document.removeEventListener('click', onClick);
+  }, []);
   useEffect(() => {
     connectivityService.start();
     return () => connectivityService.stop();
@@ -161,7 +188,7 @@ export default function App() {
           const online = await api<Me>('/auth/me');
           setMe(online);
         } catch (error) {
-          if (error instanceof Error && error.message.includes('sesión expiró')) sessionStorage.clear();
+          if (error instanceof ApiError && error.status === 401) clearTokens();
         }
       }
       setReady(true);
@@ -189,7 +216,7 @@ export default function App() {
   }, [me]);
   useEffect(() => {
     if (me && hasPermission(me, 'panels.admin') && shouldOpenMobileAdmin(route))
-      window.location.replace(`${import.meta.env.BASE_URL}admin/mobile`);
+      navigate('/admin/mobile', { replace: true });
   }, [me, route]);
   if (!ready)
     return <div className="grid min-h-screen place-items-center text-brand-700">Preparando este dispositivo…</div>;
@@ -220,7 +247,9 @@ export default function App() {
           ? 'purchaseOrders.view'
           : purchaseMatch
             ? 'purchases.view'
-            : saleMatch
+            : branchMatch
+              ? 'branches.view'
+              : saleMatch
               ? 'sales.view'
               : undefined);
   const panelPermission = route === '/' || cashierRoute ? 'panels.cashier' : 'panels.admin';
@@ -280,7 +309,13 @@ export default function App() {
   ) : route === '/settings' && !hasPermission(me, 'branches.settings') ? (
     <div className="card p-6">No tenés permiso para configurar este dispositivo.</div>
   ) : (
-    (pages[route] ?? pages['/admin'])
+    (pages[route] ?? (
+      <div className="card p-8">
+        <h1 className="text-2xl font-bold">Página no encontrada</h1>
+        <p className="mt-2 text-slate-500">La dirección solicitada no corresponde a un módulo disponible.</p>
+        <a className="btn-primary mt-4" href={appPath('/admin')}>Volver al inicio</a>
+      </div>
+    ))
   );
   return (
     <>
@@ -293,7 +328,7 @@ export default function App() {
           setCurrentBranchId(branchId);
         }}
       >
-        {page}
+        <div key={currentBranchId ?? 'all'}>{page}</div>
       </Layout>
       <PwaManager />
     </>

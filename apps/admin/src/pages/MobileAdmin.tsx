@@ -94,7 +94,7 @@ export function MobileAdmin({ me, branches, initialBranchId }: { me: Me; branche
       const created = await api<Product>('/products/quick', { method: 'POST', body: JSON.stringify({ name: form.get('name'), barcode: form.get('barcode'), salePrice: String(form.get('price')), branchId, categoryId: form.get('categoryId') || undefined, imageUrl, cost: hasPermission(me, 'costs.update') && form.get('cost') ? String(form.get('cost')) : undefined, initialStock: form.get('stock') ? String(form.get('stock')) : undefined }) });
       const supplierId = String(form.get('supplierId') || '');
       if (supplierId) await api(`/suppliers/${supplierId}/products`, { method: 'POST', body: JSON.stringify({ productId: created.id }) });
-      setMessage('Producto creado. Listo para el siguiente código.'); window.setTimeout(nextScan, 700);
+      setMessage('Producto creado y etiqueta agregada a la cola. Listo para el siguiente código.'); window.setTimeout(nextScan, 700);
     } catch (error) { setMessage(`No se pudo guardar: ${(error as Error).message}`); }
     finally { setCreating(false); }
   }

@@ -399,6 +399,7 @@ export class ProductsController {
             shelf: branchConfig.shelf,
           },
         });
+        await tx.labelPrintQueue.create({ data: { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, userId: s.sub, oldPrice: price, newPrice: price } });
         const saleFloor = new Prisma.Decimal(branchConfig.saleFloorStock ?? 0),
           warehouse = new Prisma.Decimal(branchConfig.warehouseStock ?? 0),
           total = saleFloor.plus(warehouse);
