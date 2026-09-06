@@ -122,6 +122,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
     const socket = connectPosLive(
       { branchId: branch.id, terminalId, cashSessionId: cashSession.id },
       { type: 'CART_UPDATED', payload: { total, items: cart.map((line) => ({ name: line.name, quantity: line.quantity, subtotal: lineSubtotal(line) })) } },
+      { onError: (reason) => setMessage({ kind: 'info', text: `La venta continúa disponible, pero Cajas en vivo no pudo conectarse: ${reason}` }) },
     );
     liveSocket.current = socket;
     return () => { socket.disconnect(); liveSocket.current = undefined; };

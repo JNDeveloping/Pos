@@ -332,3 +332,12 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 - PostgreSQL/API central siguen siendo la autoridad comercial y el navegador no será fuente de verdad.
 - Conservar transacciones, snapshots, soft delete, idempotencia, tenant/sucursal, redirects compatibles y bypass de
   `SUPER_ADMIN`.
+
+## Corrección de Cajas en vivo — 2026-09-06
+
+- El POS intentaba WebSocket como único transporte inicial efectivo. Cuando Apache no aceptaba `Upgrade`, Socket.IO no
+  alcanzaba el fallback y la terminal figuraba desconectada aunque las APIs HTTP funcionaran.
+- POS y monitor ahora comparten el mismo cliente autenticado, inician por long polling y ascienden a WebSocket cuando el
+  proxy lo permite. En cada reconexión renuevan el JWT y muestran el estado/error real sin bloquear una venta.
+- Apache debe tener `proxy_http` y `proxy_wstunnel`; el manual incluye un `curl` de handshake para distinguir proxy,
+  servicio detenido y respuesta HTML incorrecta. No hubo migración ni cambio de permisos.
