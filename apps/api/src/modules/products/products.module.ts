@@ -20,7 +20,18 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { BarcodeType, ChangeSource, NetContentUnit, PresentationType, Prisma, UnitType } from '@prisma/client';
+import {
+  BarcodeType,
+  ChangeSource,
+  NetContentUnit,
+  PresentationType,
+  PriceUpdateMode,
+  Prisma,
+  PsychologicalEnding,
+  RoundingDirection,
+  RoundingMode,
+  UnitType,
+} from '@prisma/client';
 import {
   IsBoolean,
   IsArray,
@@ -40,6 +51,7 @@ import {
 } from 'class-validator';
 import { CurrentSession, RequirePermissions, Session, sessionCan } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
+import { PriceCalculationService } from '../pricing/pricing.module';
 export const optionalBoolean = ({ value }: { value: unknown }) =>
   value === undefined || value === null || value === '' ? undefined : value === true || value === 'true';
 class ProductBranchDto {
@@ -77,9 +89,20 @@ class ProductDto {
   @IsOptional() @IsBoolean() isWeighted?: boolean;
   @IsOptional() @IsBoolean() allowManualPriceDefault?: boolean;
   @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsNumberString() targetMargin?: string;
+  @IsOptional() @IsEnum(RoundingMode) roundingMode?: RoundingMode;
+  @IsOptional() @IsNumberString() roundingCustom?: string;
+  @IsOptional() @IsEnum(RoundingDirection) roundingDirection?: RoundingDirection;
+  @IsOptional() @IsEnum(PsychologicalEnding) psychologicalEnding?: PsychologicalEnding;
+  @IsOptional() @IsEnum(PriceUpdateMode) priceUpdateMode?: PriceUpdateMode;
   @IsOptional() @IsString() @Matches(/^\d+$/, { message: 'El código debe ser numérico' }) barcode?: string;
-  @IsOptional() @IsArray() @ArrayMaxSize(20) @ArrayUnique() @IsString({ each: true })
-  @Matches(/^\d+$/, { each: true, message: 'Los códigos alternativos deben ser numéricos' }) alternativeBarcodes?: string[];
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @Matches(/^\d+$/, { each: true, message: 'Los códigos alternativos deben ser numéricos' })
+  alternativeBarcodes?: string[];
   @IsOptional() @ValidateNested() @Type(() => ProductBranchDto) branchConfig?: ProductBranchDto;
 }
 class QuickProductDto {
@@ -130,6 +153,8 @@ class ConfigDto {
   @IsOptional() @IsBoolean() posFavorite?: boolean;
   @IsOptional() @IsBoolean() allowManualPrice?: boolean;
   @IsOptional() @IsBoolean() queueLabel?: boolean;
+  @IsOptional() @IsBoolean() applySuggestedPrice?: boolean;
+  @IsOptional() @IsBoolean() automaticPricing?: boolean;
   @IsOptional() @IsString() location?: string;
   @IsOptional() @IsString() shelf?: string;
   @IsOptional() @IsString() internalNotes?: string;
@@ -146,6 +171,7 @@ class ListQuery {
   @IsOptional() @Transform(optionalBoolean) @IsBoolean() withoutCost?: boolean;
   @IsOptional() @Transform(optionalBoolean) @IsBoolean() withoutBarcode?: boolean;
   @IsOptional() @Transform(optionalBoolean) @IsBoolean() posFavorite?: boolean;
+  @IsOptional() @Transform(optionalBoolean) @IsBoolean() pendingLabel?: boolean;
   @IsOptional() @IsUUID() branchId?: string;
   @IsOptional() @Transform(optionalBoolean) @IsBoolean() enabled?: boolean;
   @IsOptional() @Transform(optionalBoolean) @IsBoolean() active?: boolean;
@@ -188,7 +214,10 @@ class ProductBulkDto {
 @ApiTags('Productos')
 @Controller('products')
 export class ProductsController {
-  constructor(private db: PrismaService) {}
+  constructor(
+    private db: PrismaService,
+    private pricing: PriceCalculationService,
+  ) {}
   private include = {
     category: true,
     subcategory: true,
@@ -197,7 +226,7 @@ export class ProductsController {
     supplierProducts: { include: { supplier: true }, orderBy: { preferredSupplier: 'desc' } },
     barcodes: true,
     branchConfigs: { include: { branch: true } },
-    _count: { select: { branchConfigs: { where: { enabled: true } } } },
+    _count: { select: { branchConfigs: { where: { enabled: true } }, labelQueue: { where: { status: 'PENDING' } } } },
   } as const;
   @Get() @RequirePermissions('products.view') async list(@CurrentSession() s: Session, @Query() q: ListQuery) {
     if (s.branchId && q.branchId && s.branchId !== q.branchId)
@@ -210,6 +239,10 @@ export class ProductsController {
       branchConditions.push({ branchConfigs: { some: { ...(branchId ? { branchId } : {}), cost: 0 } } });
     if (q.posFavorite)
       branchConditions.push({ branchConfigs: { some: { ...(branchId ? { branchId } : {}), posFavorite: true } } });
+    if (q.pendingLabel)
+      branchConditions.push({
+        labelQueue: { some: { companyId: s.companyId, status: 'PENDING', ...(branchId ? { branchId } : {}) } },
+      });
     if (branchId)
       branchConditions.push({
         branchConfigs:
@@ -275,9 +308,10 @@ export class ProductsController {
   ) {
     let categoryId = d.categoryId;
     if (!categoryId) {
-      const category = await this.db.category.findFirst({
-        where: { companyId: s.companyId, deletedAt: null, name: { equals: 'Sin clasificar', mode: 'insensitive' } },
-      }) ?? await this.db.category.create({ data: { companyId: s.companyId, name: 'Sin clasificar' } });
+      const category =
+        (await this.db.category.findFirst({
+          where: { companyId: s.companyId, deletedAt: null, name: { equals: 'Sin clasificar', mode: 'insensitive' } },
+        })) ?? (await this.db.category.create({ data: { companyId: s.companyId, name: 'Sin clasificar' } }));
       categoryId = category.id;
     }
     return this.create(s, {
@@ -353,21 +387,34 @@ export class ProductsController {
       ...(q.active !== undefined ? { active: q.active } : {}),
       ...(q.categoryId ? { categoryId: q.categoryId } : {}),
       ...(q.familyId ? { familyId: q.familyId } : {}),
-      ...(branchId ? {
-        branchConfigs: q.enabled === false
-          ? { none: { branchId, enabled: true } }
-          : { some: { branchId, ...(q.enabled === true ? { enabled: true } : {}) } },
-      } : {}),
-      ...(search ? { OR: [
-        { name: { contains: search, mode: 'insensitive' } },
-        { internalCode: { contains: search, mode: 'insensitive' } },
-        { sku: { contains: search, mode: 'insensitive' } },
-        { barcodes: { some: { barcode: { contains: search } } } },
-        { supplierProducts: { some: { OR: [
-          { supplierCode: { contains: search, mode: 'insensitive' } },
-          { supplierBarcode: { contains: search } },
-        ] } } },
-      ] } : {}),
+      ...(branchId
+        ? {
+            branchConfigs:
+              q.enabled === false
+                ? { none: { branchId, enabled: true } }
+                : { some: { branchId, ...(q.enabled === true ? { enabled: true } : {}) } },
+          }
+        : {}),
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' } },
+              { internalCode: { contains: search, mode: 'insensitive' } },
+              { sku: { contains: search, mode: 'insensitive' } },
+              { barcodes: { some: { barcode: { contains: search } } } },
+              {
+                supplierProducts: {
+                  some: {
+                    OR: [
+                      { supplierCode: { contains: search, mode: 'insensitive' } },
+                      { supplierBarcode: { contains: search } },
+                    ],
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
     };
     const [rows, total] = await this.db.$transaction([
       this.db.product.findMany({ where, select: { id: true }, orderBy: { name: 'asc' }, take: 5000 }),
@@ -389,35 +436,47 @@ export class ProductsController {
     const hasBranchChanges = d.stockMinimum !== undefined || d.enabled !== undefined;
     if (!hasProductChanges && !hasBranchChanges && !d.supplierId)
       throw new BadRequestException('Seleccione al menos un cambio masivo');
-    return this.db.$transaction(async (tx) => {
-      if (hasProductChanges)
-        await tx.product.updateMany({ where: { companyId: s.companyId, id: { in: d.productIds }, deletedAt: null }, data: productData });
-      if (hasBranchChanges)
-        await tx.branchProduct.updateMany({
-          where: { productId: { in: d.productIds }, branchId: d.branchId },
-          data: { ...(d.stockMinimum !== undefined ? { stockMinimum: new Prisma.Decimal(d.stockMinimum) } : {}), ...(d.enabled !== undefined ? { enabled: d.enabled } : {}) },
+    return this.db.$transaction(
+      async (tx) => {
+        if (hasProductChanges)
+          await tx.product.updateMany({
+            where: { companyId: s.companyId, id: { in: d.productIds }, deletedAt: null },
+            data: productData,
+          });
+        if (hasBranchChanges)
+          await tx.branchProduct.updateMany({
+            where: { productId: { in: d.productIds }, branchId: d.branchId },
+            data: {
+              ...(d.stockMinimum !== undefined ? { stockMinimum: new Prisma.Decimal(d.stockMinimum) } : {}),
+              ...(d.enabled !== undefined ? { enabled: d.enabled } : {}),
+            },
+          });
+        if (d.supplierId) {
+          await tx.supplierProduct.createMany({
+            data: d.productIds.map((productId) => ({ supplierId: d.supplierId!, productId })),
+            skipDuplicates: true,
+          });
+          await tx.supplierProduct.updateMany({
+            where: { supplierId: d.supplierId, productId: { in: d.productIds } },
+            data: { active: true },
+          });
+        }
+        const batchId = randomUUID();
+        await tx.auditLog.create({
+          data: {
+            companyId: s.companyId,
+            branchId: d.branchId,
+            userId: s.sub,
+            entityType: 'PRODUCT_BULK',
+            entityId: batchId,
+            action: 'PRODUCTS_BULK_UPDATED',
+            metadata: { batchId, count: rows.length, productIds: d.productIds, changes: this.json(d) },
+          },
         });
-      if (d.supplierId) {
-        await tx.supplierProduct.createMany({
-          data: d.productIds.map((productId) => ({ supplierId: d.supplierId!, productId })),
-          skipDuplicates: true,
-        });
-        await tx.supplierProduct.updateMany({ where: { supplierId: d.supplierId, productId: { in: d.productIds } }, data: { active: true } });
-      }
-      const batchId = randomUUID();
-      await tx.auditLog.create({
-        data: {
-          companyId: s.companyId,
-          branchId: d.branchId,
-          userId: s.sub,
-          entityType: 'PRODUCT_BULK',
-          entityId: batchId,
-          action: 'PRODUCTS_BULK_UPDATED',
-          metadata: { batchId, count: rows.length, productIds: d.productIds, changes: this.json(d) },
-        },
-      });
-      return { updated: rows.length, batchId };
-    }, { timeout: 60000 });
+        return { updated: rows.length, batchId };
+      },
+      { timeout: 60000 },
+    );
   }
   @Get('bulk-delete-all/summary') @RequirePermissions('products.purgeAll') async deleteAllSummary(
     @CurrentSession() s: Session,
@@ -430,20 +489,30 @@ export class ProductsController {
   ) {
     if (confirmation !== 'VACIAR PRODUCTOS') throw new BadRequestException('Confirmación inválida');
     const now = new Date();
-    return this.db.$transaction(async (tx) => {
-      const products = await tx.product.updateMany({
-        where: { companyId: s.companyId, deletedAt: null },
-        data: { active: false, deletedAt: now },
-      });
-      await tx.branchProduct.updateMany({
-        where: { branch: { companyId: s.companyId }, product: { deletedAt: now } },
-        data: { enabled: false },
-      });
-      await tx.auditLog.create({
-        data: { companyId: s.companyId, userId: s.sub, entityType: 'PRODUCT', entityId: s.companyId, action: 'ALL_PRODUCTS_DISABLED', metadata: { count: products.count } },
-      });
-      return { count: products.count };
-    }, { timeout: 60000 });
+    return this.db.$transaction(
+      async (tx) => {
+        const products = await tx.product.updateMany({
+          where: { companyId: s.companyId, deletedAt: null },
+          data: { active: false, deletedAt: now },
+        });
+        await tx.branchProduct.updateMany({
+          where: { branch: { companyId: s.companyId }, product: { deletedAt: now } },
+          data: { enabled: false },
+        });
+        await tx.auditLog.create({
+          data: {
+            companyId: s.companyId,
+            userId: s.sub,
+            entityType: 'PRODUCT',
+            entityId: s.companyId,
+            action: 'ALL_PRODUCTS_DISABLED',
+            metadata: { count: products.count },
+          },
+        });
+        return { count: products.count };
+      },
+      { timeout: 60000 },
+    );
   }
   @Get(':id') @RequirePermissions('products.view') async one(@CurrentSession() s: Session, @Param('id') id: string) {
     const p = await this.db.product.findFirst({
@@ -509,7 +578,7 @@ export class ProductsController {
       if (branchConfig) {
         const cost = this.money(branchConfig.cost ?? 0),
           price = this.money(branchConfig.salePrice ?? 0),
-          margin = cost.gt(0) ? price.minus(cost).div(cost).mul(100).toDecimalPlaces(2) : new Prisma.Decimal(0);
+          margin = price.gt(0) ? price.minus(cost).div(price).mul(100).toDecimalPlaces(2) : new Prisma.Decimal(0);
         await tx.branchProduct.create({
           data: {
             branchId: branchConfig.branchId,
@@ -525,18 +594,56 @@ export class ProductsController {
             shelf: branchConfig.shelf,
           },
         });
-        await tx.labelPrintQueue.create({ data: { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, userId: s.sub, oldPrice: price, newPrice: price } });
+        await tx.labelPrintQueue.create({
+          data: {
+            companyId: s.companyId,
+            branchId: branchConfig.branchId,
+            productId: product.id,
+            userId: s.sub,
+            oldPrice: price,
+            newPrice: price,
+          },
+        });
         const saleFloor = new Prisma.Decimal(branchConfig.saleFloorStock ?? 0),
           warehouse = new Prisma.Decimal(branchConfig.warehouseStock ?? 0),
           total = saleFloor.plus(warehouse);
         if (saleFloor.lt(0) || warehouse.lt(0)) throw new BadRequestException('El stock inicial no puede ser negativo');
         if (total.gt(0)) {
-          await tx.stock.create({ data: { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, quantity: total } });
-          await tx.stockLocationBalance.createMany({ data: [
-            { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, location: 'SALE_FLOOR', quantity: saleFloor },
-            { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, location: 'WAREHOUSE', quantity: warehouse },
-          ] });
-          await tx.stockMovement.create({ data: { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, type: 'INITIAL_STOCK', quantity: total, previousQuantity: 0, newQuantity: total, reason: 'Alta de producto', userId: s.sub, metadata: { saleFloor: saleFloor.toString(), warehouse: warehouse.toString() } } });
+          await tx.stock.create({
+            data: { companyId: s.companyId, branchId: branchConfig.branchId, productId: product.id, quantity: total },
+          });
+          await tx.stockLocationBalance.createMany({
+            data: [
+              {
+                companyId: s.companyId,
+                branchId: branchConfig.branchId,
+                productId: product.id,
+                location: 'SALE_FLOOR',
+                quantity: saleFloor,
+              },
+              {
+                companyId: s.companyId,
+                branchId: branchConfig.branchId,
+                productId: product.id,
+                location: 'WAREHOUSE',
+                quantity: warehouse,
+              },
+            ],
+          });
+          await tx.stockMovement.create({
+            data: {
+              companyId: s.companyId,
+              branchId: branchConfig.branchId,
+              productId: product.id,
+              type: 'INITIAL_STOCK',
+              quantity: total,
+              previousQuantity: 0,
+              newQuantity: total,
+              reason: 'Alta de producto',
+              userId: s.sub,
+              metadata: { saleFloor: saleFloor.toString(), warehouse: warehouse.toString() },
+            },
+          });
         }
       }
       await tx.auditLog.create({
@@ -552,16 +659,20 @@ export class ProductsController {
       return product;
     });
   }
-  @Post('image') @RequirePermissions('products.create')
+  @Post('image')
+  @RequirePermissions('products.create')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 8 * 1024 * 1024, files: 1 } }))
   async uploadImage(@CurrentSession() s: Session, @UploadedFile() file?: { buffer: Buffer; mimetype: string }) {
     if (!file) throw new BadRequestException('Seleccione una imagen');
     const extensions: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
     const extension = extensions[file.mimetype];
     if (!extension) throw new BadRequestException('Use una imagen JPG, PNG o WebP');
-    const valid = (extension === 'jpg' && file.buffer[0] === 0xff && file.buffer[1] === 0xd8) ||
+    const valid =
+      (extension === 'jpg' && file.buffer[0] === 0xff && file.buffer[1] === 0xd8) ||
       (extension === 'png' && file.buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) ||
-      (extension === 'webp' && file.buffer.subarray(0, 4).toString() === 'RIFF' && file.buffer.subarray(8, 12).toString() === 'WEBP');
+      (extension === 'webp' &&
+        file.buffer.subarray(0, 4).toString() === 'RIFF' &&
+        file.buffer.subarray(8, 12).toString() === 'WEBP');
     if (!valid) throw new BadRequestException('El archivo no contiene una imagen válida');
     const directory = resolve(process.cwd(), 'uploads/public/products', s.companyId);
     await mkdir(directory, { recursive: true });
@@ -626,6 +737,12 @@ export class ProductsController {
       }
       if (!/^\d{13}$/.test(barcode)) result.warnings.push(`${barcode}: código comercial no EAN-13`);
       try {
+        const pricingQuote = row.costo
+          ? await this.pricing.quote(s.companyId, {
+              cost: row.costo,
+              ...(row.precio ? { finalPrice: row.precio } : {}),
+            })
+          : undefined;
         await this.db.$transaction(async (tx) => {
           const categoryName = this.normalizeCategory(row.rubro);
           const categoryKey = this.categoryKey(row.rubro);
@@ -737,28 +854,80 @@ export class ProductsController {
             });
             result.created++;
           }
-          if (d.enableForBranch && d.branchId)
-            await tx.branchProduct.upsert({
+          if (d.enableForBranch && d.branchId) {
+            const previous = await tx.branchProduct.findUnique({
+              where: { branchId_productId: { branchId: d.branchId, productId: product.id } },
+            });
+            const importedPrice = row.precio ? new Prisma.Decimal(row.precio) : pricingQuote?.suggestedPrice;
+            const importedCost = row.costo ? new Prisma.Decimal(row.costo) : previous?.cost;
+            const config = await tx.branchProduct.upsert({
               where: { branchId_productId: { branchId: d.branchId, productId: product.id } },
               create: {
                 branchId: d.branchId,
                 productId: product.id,
                 enabled: true,
-                cost: row.costo ?? 0,
-                salePrice: row.precio ?? 0,
-                margin:
-                  row.costo && row.precio && Number(row.costo) > 0
-                    ? ((Number(row.precio) - Number(row.costo)) / Number(row.costo)) * 100
-                    : 0,
+                cost: importedCost ?? 0,
+                salePrice: importedPrice ?? 0,
+                calculatedPrice: pricingQuote?.calculatedPrice,
+                targetMargin: pricingQuote?.targetMargin,
+                margin: importedPrice && importedCost ? this.pricing.calculateMargin(importedCost, importedPrice) : 0,
                 location: row.ubicacion,
               },
               update: {
                 enabled: true,
-                ...(row.costo ? { cost: row.costo } : {}),
-                ...(row.precio ? { salePrice: row.precio } : {}),
+                ...(importedCost ? { cost: importedCost } : {}),
+                ...(importedPrice
+                  ? {
+                      salePrice: importedPrice,
+                      margin: this.pricing.calculateMargin(importedCost ?? 0, importedPrice),
+                      calculatedPrice: pricingQuote?.calculatedPrice,
+                      targetMargin: pricingQuote?.targetMargin,
+                    }
+                  : {}),
                 ...(row.ubicacion ? { location: row.ubicacion } : {}),
               },
             });
+            if (previous && importedCost && !previous.cost.equals(importedCost))
+              await tx.costHistory.create({
+                data: {
+                  productId: product.id,
+                  branchId: d.branchId,
+                  oldCost: previous.cost,
+                  newCost: importedCost,
+                  percentageChange: this.percentage(previous.cost, importedCost),
+                  source: ChangeSource.IMPORT,
+                  changedByUserId: s.sub,
+                },
+              });
+            if (previous && importedPrice && !previous.salePrice.equals(importedPrice)) {
+              await tx.priceHistory.create({
+                data: {
+                  productId: product.id,
+                  branchId: d.branchId,
+                  oldPrice: previous.salePrice,
+                  newPrice: importedPrice,
+                  percentageChange: this.percentage(previous.salePrice, importedPrice),
+                  calculatedPrice: pricingQuote?.calculatedPrice,
+                  targetMargin: pricingQuote?.targetMargin,
+                  actualMargin: config.margin,
+                  actualMarkup: this.pricing.calculateMarkup(importedCost ?? 0, importedPrice),
+                  roundingRule: pricingQuote?.roundingRule,
+                  source: ChangeSource.IMPORT,
+                  changedByUserId: s.sub,
+                },
+              });
+              await tx.labelPrintQueue.create({
+                data: {
+                  companyId: s.companyId,
+                  branchId: d.branchId,
+                  productId: product.id,
+                  userId: s.sub,
+                  oldPrice: previous.salePrice,
+                  newPrice: importedPrice,
+                },
+              });
+            }
+          }
           await tx.auditLog.create({
             data: {
               companyId: s.companyId,
@@ -853,10 +1022,8 @@ export class ProductsController {
     if (d.internalCode && d.internalCode.toUpperCase() !== before.internalCode)
       await this.ensureInternalCodeAvailable(s, d.internalCode, id);
     if (d.caseBarcode && d.caseBarcode !== before.caseBarcode) await this.ensureBarcodeAvailable(s, d.caseBarcode, id);
-    if (d.categoryId)
-      await this.validateRefs(s, d.categoryId, d.brandId, d.subcategoryId, d.familyId ?? undefined);
-    else if (d.familyId)
-      await this.validateFamily(s, d.familyId);
+    if (d.categoryId) await this.validateRefs(s, d.categoryId, d.brandId, d.subcategoryId, d.familyId ?? undefined);
+    else if (d.familyId) await this.validateFamily(s, d.familyId);
     return this.db.$transaction(async (tx) => {
       const product = await tx.product.update({
         where: { id },
@@ -986,16 +1153,27 @@ export class ProductsController {
     await this.owned(s, id);
     const branch = await this.db.branch.findFirst({ where: { id: branchId, companyId: s.companyId, deletedAt: null } });
     if (!branch || (s.branchId && s.branchId !== branchId)) throw new NotFoundException('Sucursal no encontrada');
+    const current = await this.db.branchProduct.findUnique({
+      where: { branchId_productId: { branchId, productId: id } },
+    });
+    const cost = this.money(d.cost ?? current?.cost ?? 0);
+    const quote = await this.pricing.quote(s.companyId, {
+      cost: cost.toString(),
+      productId: id,
+      ...(d.margin !== undefined ? { targetMargin: d.margin } : {}),
+      ...(d.salePrice !== undefined ? { finalPrice: d.salePrice } : {}),
+    });
+    const automaticPricing = d.automaticPricing ?? current?.automaticPricing ?? true;
+    const price =
+      d.salePrice !== undefined
+        ? this.money(d.salePrice)
+        : d.applySuggestedPrice || (automaticPricing && quote.priceUpdateMode === 'AUTO' && d.cost !== undefined)
+          ? quote.suggestedPrice
+          : this.money(current?.salePrice ?? quote.suggestedPrice);
+    const targetMargin = new Prisma.Decimal(d.margin ?? quote.targetMargin);
+    const actualMargin = this.pricing.calculateMargin(cost, price),
+      actualMarkup = this.pricing.calculateMarkup(cost, price);
     return this.db.$transaction(async (tx) => {
-      const current = await tx.branchProduct.findUnique({ where: { branchId_productId: { branchId, productId: id } } });
-      const cost = this.money(d.cost ?? current?.cost ?? 0),
-        price =
-          d.salePrice !== undefined
-            ? this.money(d.salePrice)
-            : d.margin !== undefined
-              ? this.money(cost.mul(new Prisma.Decimal(1).plus(new Prisma.Decimal(d.margin).div(100))))
-              : this.money(current?.salePrice ?? 0);
-      const margin = cost.gt(0) ? price.minus(cost).div(cost).mul(100).toDecimalPlaces(2) : new Prisma.Decimal(0);
       const config = await tx.branchProduct.upsert({
         where: { branchId_productId: { branchId, productId: id } },
         create: {
@@ -1003,7 +1181,11 @@ export class ProductsController {
           productId: id,
           cost,
           salePrice: price,
-          margin,
+          margin: actualMargin,
+          targetMargin,
+          calculatedPrice: quote.calculatedPrice,
+          automaticPricing,
+          manualPrice: d.salePrice !== undefined,
           stockMinimum: this.money(d.stockMinimum ?? 0),
           enabled: d.enabled ?? true,
           posFavorite: d.posFavorite ?? false,
@@ -1015,7 +1197,11 @@ export class ProductsController {
         update: {
           cost,
           salePrice: price,
-          margin,
+          margin: actualMargin,
+          targetMargin,
+          calculatedPrice: quote.calculatedPrice,
+          automaticPricing,
+          manualPrice: d.salePrice !== undefined ? true : d.applySuggestedPrice ? false : undefined,
           stockMinimum: d.stockMinimum !== undefined ? this.money(d.stockMinimum) : undefined,
           enabled: d.enabled,
           posFavorite: d.posFavorite,
@@ -1033,11 +1219,16 @@ export class ProductsController {
             oldPrice: current.salePrice,
             newPrice: price,
             percentageChange: this.percentage(current.salePrice, price),
+            calculatedPrice: quote.calculatedPrice,
+            targetMargin,
+            actualMargin,
+            actualMarkup,
+            roundingRule: quote.roundingRule,
             source: d.source ?? ChangeSource.MANUAL,
             changedByUserId: s.sub,
           },
         });
-      if (current && !current.salePrice.equals(price) && d.queueLabel)
+      if (current && !current.salePrice.equals(price))
         await tx.labelPrintQueue.create({
           data: {
             companyId: s.companyId,
@@ -1136,7 +1327,13 @@ export class ProductsController {
   private json(value: unknown) {
     return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
   }
-  private async validateRefs(s: Session, categoryId: string, brandId?: string, subcategoryId?: string, familyId?: string) {
+  private async validateRefs(
+    s: Session,
+    categoryId: string,
+    brandId?: string,
+    subcategoryId?: string,
+    familyId?: string,
+  ) {
     const [c, b, subcategory, family] = await Promise.all([
       this.db.category.findFirst({ where: { id: categoryId, companyId: s.companyId, deletedAt: null } }),
       brandId ? this.db.brand.findFirst({ where: { id: brandId, companyId: s.companyId, deletedAt: null } }) : true,
@@ -1145,18 +1342,26 @@ export class ProductsController {
             where: { id: subcategoryId, companyId: s.companyId, parentId: categoryId, deletedAt: null },
           })
         : true,
-      familyId ? this.db.productFamily.findFirst({ where: { id: familyId, companyId: s.companyId, active: true } }) : true,
+      familyId
+        ? this.db.productFamily.findFirst({ where: { id: familyId, companyId: s.companyId, active: true } })
+        : true,
     ]);
     if (!c || !b || !subcategory || !family)
       throw new BadRequestException('Categoría, subcategoría, familia o marca inválida');
   }
   private async validateFamily(s: Session, familyId: string) {
-    const family = await this.db.productFamily.findFirst({ where: { id: familyId, companyId: s.companyId, active: true } });
+    const family = await this.db.productFamily.findFirst({
+      where: { id: familyId, companyId: s.companyId, active: true },
+    });
     if (!family) throw new BadRequestException('Familia inválida');
   }
   private async ensureInternalCodeAvailable(s: Session, internalCode: string, productId?: string) {
     const conflict = await this.db.product.findFirst({
-      where: { companyId: s.companyId, internalCode: internalCode.toUpperCase(), ...(productId ? { id: { not: productId } } : {}) },
+      where: {
+        companyId: s.companyId,
+        internalCode: internalCode.toUpperCase(),
+        ...(productId ? { id: { not: productId } } : {}),
+      },
       select: { id: true },
     });
     if (conflict) throw new BadRequestException('El código interno ya pertenece a otro producto');
@@ -1164,24 +1369,36 @@ export class ProductsController {
   private async validateBulk(s: Session, d: ProductBulkDto) {
     if (!d.productIds.length) throw new BadRequestException('Seleccione al menos un producto');
     if (d.branchId) {
-      const branch = await this.db.branch.findFirst({ where: { id: d.branchId, companyId: s.companyId, deletedAt: null } });
+      const branch = await this.db.branch.findFirst({
+        where: { id: d.branchId, companyId: s.companyId, deletedAt: null },
+      });
       if (!branch || (s.branchId && s.branchId !== d.branchId)) throw new BadRequestException('Sucursal inválida');
     }
     if ((d.stockMinimum !== undefined || d.enabled !== undefined) && !d.branchId)
       throw new BadRequestException('Debe seleccionar una sucursal para cambios operativos');
-    if (d.categoryId) await this.validateRefs(s, d.categoryId, undefined, d.subcategoryId ?? undefined, d.familyId ?? undefined);
+    if (d.categoryId)
+      await this.validateRefs(s, d.categoryId, undefined, d.subcategoryId ?? undefined, d.familyId ?? undefined);
     else if (d.subcategoryId) throw new BadRequestException('La subcategoría requiere una categoría');
     else if (d.familyId) await this.validateFamily(s, d.familyId);
     if (d.supplierId) {
-      const supplier = await this.db.supplier.findFirst({ where: { id: d.supplierId, companyId: s.companyId, active: true, deletedAt: null } });
+      const supplier = await this.db.supplier.findFirst({
+        where: { id: d.supplierId, companyId: s.companyId, active: true, deletedAt: null },
+      });
       if (!supplier) throw new BadRequestException('Proveedor inválido');
     }
     const rows = await this.db.product.findMany({
       where: { companyId: s.companyId, id: { in: d.productIds }, deletedAt: null },
-      select: { id: true, internalCode: true, name: true, category: { select: { name: true } }, family: { select: { name: true } } },
+      select: {
+        id: true,
+        internalCode: true,
+        name: true,
+        category: { select: { name: true } },
+        family: { select: { name: true } },
+      },
       orderBy: { name: 'asc' },
     });
-    if (rows.length !== d.productIds.length) throw new BadRequestException('La selección contiene productos inexistentes o fuera de la empresa');
+    if (rows.length !== d.productIds.length)
+      throw new BadRequestException('La selección contiene productos inexistentes o fuera de la empresa');
     return rows;
   }
   private async ensureBarcodeAvailable(s: Session, barcode: string, productId?: string) {
@@ -1196,6 +1413,12 @@ class FamilyDto {
   @IsString() @Length(2, 100) name!: string;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsBoolean() active?: boolean;
+  @IsOptional() @IsNumberString() targetMargin?: string;
+  @IsOptional() @IsEnum(RoundingMode) roundingMode?: RoundingMode;
+  @IsOptional() @IsNumberString() roundingCustom?: string;
+  @IsOptional() @IsEnum(RoundingDirection) roundingDirection?: RoundingDirection;
+  @IsOptional() @IsEnum(PsychologicalEnding) psychologicalEnding?: PsychologicalEnding;
+  @IsOptional() @IsEnum(PriceUpdateMode) priceUpdateMode?: PriceUpdateMode;
 }
 @Controller('product-families')
 class ProductFamiliesController {

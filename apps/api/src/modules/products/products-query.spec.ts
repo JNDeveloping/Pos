@@ -21,8 +21,15 @@ describe('product pagination', () => {
       product: { findMany, count: jest.fn().mockResolvedValue(50000) },
       $transaction: jest.fn((operations: Promise<unknown>[]) => Promise.all(operations)),
     };
-    const session: Session = { sub: 'u', companyId: 'c', branchId: null, roles: [], permissions: ['products.view'], tokenVersion: 0 };
-    const controller = new ProductsController(db as never);
+    const session: Session = {
+      sub: 'u',
+      companyId: 'c',
+      branchId: null,
+      roles: [],
+      permissions: ['products.view'],
+      tokenVersion: 0,
+    };
+    const controller = new ProductsController(db as never, {} as never);
     const result = await controller.list(session, {
       page: 125,
       limit: 20,
@@ -30,18 +37,34 @@ describe('product pagination', () => {
       familyId: '00000000-0000-4000-8000-000000000001',
     });
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 2480, take: 20 }));
-    expect(findMany.mock.calls[0][0].where).toEqual(expect.objectContaining({
-      companyId: 'c',
-      familyId: '00000000-0000-4000-8000-000000000001',
-    }));
+    expect(findMany.mock.calls[0][0].where).toEqual(
+      expect.objectContaining({
+        companyId: 'c',
+        familyId: '00000000-0000-4000-8000-000000000001',
+      }),
+    );
     expect(result.meta).toEqual(expect.objectContaining({ total: 50000, pages: 2500 }));
   });
   it('resuelve como máximo 5.000 ids desde filtros sin cargar fichas completas', async () => {
     const findMany = jest.fn().mockResolvedValue([{ id: 'one' }, { id: 'two' }]);
-    const db = { product: { findMany, count: jest.fn().mockResolvedValue(6000) }, $transaction: jest.fn((operations: Promise<unknown>[]) => Promise.all(operations)) };
-    const controller = new ProductsController(db as never);
-    const session: Session = { sub: 'u', companyId: 'c', branchId: null, roles: [], permissions: ['products.bulkUpdate'], tokenVersion: 0 };
-    await expect(controller.bulkSelection(session, { page: 1, limit: 20, search: 'pan' })).resolves.toEqual({ productIds: ['one', 'two'], total: 6000, limited: true });
+    const db = {
+      product: { findMany, count: jest.fn().mockResolvedValue(6000) },
+      $transaction: jest.fn((operations: Promise<unknown>[]) => Promise.all(operations)),
+    };
+    const controller = new ProductsController(db as never, {} as never);
+    const session: Session = {
+      sub: 'u',
+      companyId: 'c',
+      branchId: null,
+      roles: [],
+      permissions: ['products.bulkUpdate'],
+      tokenVersion: 0,
+    };
+    await expect(controller.bulkSelection(session, { page: 1, limit: 20, search: 'pan' })).resolves.toEqual({
+      productIds: ['one', 'two'],
+      total: 6000,
+      limited: true,
+    });
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ select: { id: true }, take: 5000 }));
   });
 });

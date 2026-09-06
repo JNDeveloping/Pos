@@ -12,7 +12,28 @@ enum RoundingMode {
   MULTIPLE_10
   MULTIPLE_50
   MULTIPLE_100
+  MULTIPLE_500
+  MULTIPLE_1000
   CUSTOM
+}
+
+enum RoundingDirection {
+  UP
+  NEAREST
+}
+
+enum PriceUpdateMode {
+  AUTO
+  SUGGEST
+  KEEP
+}
+
+enum PsychologicalEnding {
+  NONE
+  END_00
+  END_50
+  END_90
+  END_99
 }
 
 enum BarcodeType {
@@ -30,6 +51,10 @@ enum ChangeSource {
   BULK_UPDATE
   COST_RECALCULATION
   PURCHASE
+  MOBILE
+  INVOICE
+  FAMILY_UPDATE
+  CATEGORY_UPDATE
 }
 
 enum PresentationType {
@@ -78,25 +103,25 @@ enum PaymentMethodKind {
 }
 
 model Company {
-  id               String            @id @default(uuid()) @db.Uuid
+  id               String             @id @default(uuid()) @db.Uuid
   name             String
   legalName        String?
-  cuit             String?           @unique
+  cuit             String?            @unique
   phone            String?
   email            String?
   address          String?
   city             String?
   province         String?
-  country          String            @default("Argentina")
-  currency         String            @default("ARS")
-  timezone         String            @default("America/Argentina/Buenos_Aires")
+  country          String             @default("Argentina")
+  currency         String             @default("ARS")
+  timezone         String             @default("America/Argentina/Buenos_Aires")
   logoUrl          String?
-  productSequence  Int               @default(0)
-  defaultMargin    Decimal           @default(30) @db.Decimal(7, 2)
-  roundingMode     RoundingMode      @default(MULTIPLE_10)
-  active           Boolean           @default(true)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  productSequence  Int                @default(0)
+  defaultMargin    Decimal            @default(30) @db.Decimal(7, 2)
+  roundingMode     RoundingMode       @default(MULTIPLE_10)
+  active           Boolean            @default(true)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
   branches         Branch[]
   users            User[]
   roles            Role[]
@@ -117,34 +142,36 @@ model Company {
   labelQueue       LabelPrintQueue[]
 }
 
-
 model CompanySetting {
-  id String @id @default(uuid()) @db.Uuid
-  companyId String @db.Uuid
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  key String
-  value Json
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @db.Uuid
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  key       String
+  value     Json
   updatedAt DateTime @updatedAt
+
   @@unique([companyId, key])
 }
+
 model BranchSetting {
-  id String @id @default(uuid()) @db.Uuid
-  companyId String @db.Uuid
-  branchId String @db.Uuid
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  key String
-  value Json
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @db.Uuid
+  branchId  String   @db.Uuid
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  key       String
+  value     Json
   updatedAt DateTime @updatedAt
+
   @@unique([branchId, key])
   @@index([companyId, key])
 }
 
 model Branch {
-  id                              String          @id @default(uuid()) @db.Uuid
-  companyId                       String          @db.Uuid
+  id                              String             @id @default(uuid()) @db.Uuid
+  companyId                       String             @db.Uuid
   settings                        BranchSetting[]
-  company                         Company         @relation(fields: [companyId], references: [id])
+  company                         Company            @relation(fields: [companyId], references: [id])
   name                            String
   code                            String
   address                         String?
@@ -155,23 +182,23 @@ model Branch {
   email                           String?
   postalCode                      String?
   businessHours                   String?
-  latitude                        Decimal?        @db.Decimal(10, 7)
-  longitude                       Decimal?        @db.Decimal(10, 7)
-  defaultMargin                   Decimal         @default(30) @db.Decimal(7, 2)
-  defaultTaxRate                  Decimal         @default(21) @db.Decimal(5, 2)
-  roundingMode                    RoundingMode    @default(MULTIPLE_10)
-  roundingCustom                  Decimal?        @db.Decimal(10, 2)
-  minimumMargin                   Decimal         @default(0) @db.Decimal(7, 2)
-  defaultPriceListId              String?         @db.Uuid
-  defaultPriceList                PriceList?      @relation(fields: [defaultPriceListId], references: [id])
+  latitude                        Decimal?           @db.Decimal(10, 7)
+  longitude                       Decimal?           @db.Decimal(10, 7)
+  defaultMargin                   Decimal            @default(30) @db.Decimal(7, 2)
+  defaultTaxRate                  Decimal            @default(21) @db.Decimal(5, 2)
+  roundingMode                    RoundingMode       @default(MULTIPLE_10)
+  roundingCustom                  Decimal?           @db.Decimal(10, 2)
+  minimumMargin                   Decimal            @default(0) @db.Decimal(7, 2)
+  defaultPriceListId              String?            @db.Uuid
+  defaultPriceList                PriceList?         @relation(fields: [defaultPriceListId], references: [id])
   labelQueue                      LabelPrintQueue[]
-  allowDiscounts                  Boolean         @default(false)
-  maxDiscount                     Decimal         @default(0) @db.Decimal(5, 2)
-  allowManualPrice                Boolean         @default(false)
-  requireCashOpen                 Boolean         @default(true)
-  autoPrintTicket                 Boolean         @default(true)
-  ticketWidth                     Int             @default(80)
-  pricesIncludeTax                Boolean         @default(true)
+  allowDiscounts                  Boolean            @default(false)
+  maxDiscount                     Decimal            @default(0) @db.Decimal(5, 2)
+  allowManualPrice                Boolean            @default(false)
+  requireCashOpen                 Boolean            @default(true)
+  autoPrintTicket                 Boolean            @default(true)
+  ticketWidth                     Int                @default(80)
+  pricesIncludeTax                Boolean            @default(true)
   ticketTradeName                 String?
   ticketLegalName                 String?
   ticketCuit                      String?
@@ -179,18 +206,18 @@ model Branch {
   ticketPhone                     String?
   ticketFooter                    String?
   ticketHeader                    String?
-  ticketShowBarcode               Boolean         @default(false)
-  ticketShowCuit                  Boolean         @default(true)
-  ticketShowCashier               Boolean         @default(true)
-  ticketShowSaleCode              Boolean         @default(true)
-  active                          Boolean         @default(true)
-  allowNegativeStock              Boolean         @default(false)
-  trackLots                       Boolean         @default(false)
-  lowStockAlerts                  Boolean         @default(true)
-  expirationAlerts                Boolean         @default(true)
-  maxDiscountWithoutAuthorization Decimal         @default(0) @db.Decimal(5, 2)
-  createdAt                       DateTime        @default(now())
-  updatedAt                       DateTime        @updatedAt
+  ticketShowBarcode               Boolean            @default(false)
+  ticketShowCuit                  Boolean            @default(true)
+  ticketShowCashier               Boolean            @default(true)
+  ticketShowSaleCode              Boolean            @default(true)
+  active                          Boolean            @default(true)
+  allowNegativeStock              Boolean            @default(false)
+  trackLots                       Boolean            @default(false)
+  lowStockAlerts                  Boolean            @default(true)
+  expirationAlerts                Boolean            @default(true)
+  maxDiscountWithoutAuthorization Decimal            @default(0) @db.Decimal(5, 2)
+  createdAt                       DateTime           @default(now())
+  updatedAt                       DateTime           @updatedAt
   deletedAt                       DateTime?
   users                           User[]
   userAccesses                    UserBranchAccess[]
@@ -222,6 +249,7 @@ enum StockMovementType {
   INITIAL_STOCK
   OTHER
 }
+
 enum StockLocationType {
   SALE_FLOOR
   WAREHOUSE
@@ -335,17 +363,17 @@ model StockLot {
 }
 
 model LabelPrintQueue {
-  id          String           @id @default(uuid()) @db.Uuid
-  companyId   String           @db.Uuid
-  branchId    String           @db.Uuid
-  productId   String           @db.Uuid
-  userId      String           @db.Uuid
-  oldPrice    Decimal          @db.Decimal(14, 2)
-  newPrice    Decimal          @db.Decimal(14, 2)
-  quantity    Int              @default(1)
-  status      LabelQueueStatus @default(PENDING)
-  printedAt   DateTime?
-  createdAt   DateTime         @default(now())
+  id        String           @id @default(uuid()) @db.Uuid
+  companyId String           @db.Uuid
+  branchId  String           @db.Uuid
+  productId String           @db.Uuid
+  userId    String           @db.Uuid
+  oldPrice  Decimal          @db.Decimal(14, 2)
+  newPrice  Decimal          @db.Decimal(14, 2)
+  quantity  Int              @default(1)
+  status    LabelQueueStatus @default(PENDING)
+  printedAt DateTime?
+  createdAt DateTime         @default(now())
 
   company Company @relation(fields: [companyId], references: [id])
   branch  Branch  @relation(fields: [branchId], references: [id])
@@ -464,17 +492,17 @@ enum CashMovementKind {
 }
 
 model Terminal {
-  id             String   @id @default(uuid()) @db.Uuid
-  companyId      String   @db.Uuid
-  branchId       String   @db.Uuid
+  id             String        @id @default(uuid()) @db.Uuid
+  companyId      String        @db.Uuid
+  branchId       String        @db.Uuid
   code           String
   name           String
-  active         Boolean  @default(true)
+  active         Boolean       @default(true)
   printerName    String?
   posConfig      Json?
-  nextSaleNumber Int      @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  nextSaleNumber Int           @default(0)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
   cashSessions   CashSession[]
 
   @@unique([branchId, code])
@@ -568,16 +596,16 @@ model PosQuickGroupItem {
 }
 
 model PaymentMethod {
-  id                String    @id @default(uuid()) @db.Uuid
-  companyId         String    @db.Uuid
+  id                String            @id @default(uuid()) @db.Uuid
+  companyId         String            @db.Uuid
   code              String
   name              String
   kind              PaymentMethodKind @default(OTHER)
-  active            Boolean   @default(true)
-  requiresReference Boolean   @default(false)
-  sortOrder         Int       @default(0)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  active            Boolean           @default(true)
+  requiresReference Boolean           @default(false)
+  sortOrder         Int               @default(0)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
   payments          Payment[]
 
   @@unique([companyId, code])
@@ -692,32 +720,32 @@ model SaleReturnItem {
 }
 
 model User {
-  id                    String          @id @default(uuid()) @db.Uuid
-  companyId             String          @db.Uuid
-  company               Company         @relation(fields: [companyId], references: [id])
-  branchId              String?         @db.Uuid
-  branch                Branch?         @relation(fields: [branchId], references: [id])
+  id                    String             @id @default(uuid()) @db.Uuid
+  companyId             String             @db.Uuid
+  company               Company            @relation(fields: [companyId], references: [id])
+  branchId              String?            @db.Uuid
+  branch                Branch?            @relation(fields: [branchId], references: [id])
   username              String
   email                 String?
   passwordHash          String
   firstName             String
   lastName              String
-  active                Boolean         @default(true)
+  active                Boolean            @default(true)
   lastLoginAt           DateTime?
-  tokenVersion          Int             @default(0)
+  tokenVersion          Int                @default(0)
   refreshTokenHash      String?
-  createdAt             DateTime        @default(now())
-  updatedAt             DateTime        @updatedAt
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
   deletedAt             DateTime?
   roles                 UserRole[]
   priceChanges          PriceHistory[]
   costChanges           CostHistory[]
   auditLogs             AuditLog[]
-  createdPurchaseOrders PurchaseOrder[] @relation("PurchaseOrderCreator")
-  createdPurchases      Purchase[]      @relation("PurchaseCreator")
-  confirmedPurchases    Purchase[]      @relation("PurchaseConfirmer")
-  cashSessions          CashSession[]   @relation("CashierSessions")
-  closedCashSessions    CashSession[]   @relation("ClosedCashSessions")
+  createdPurchaseOrders PurchaseOrder[]    @relation("PurchaseOrderCreator")
+  createdPurchases      Purchase[]         @relation("PurchaseCreator")
+  confirmedPurchases    Purchase[]         @relation("PurchaseConfirmer")
+  cashSessions          CashSession[]      @relation("CashierSessions")
+  closedCashSessions    CashSession[]      @relation("ClosedCashSessions")
   branchAccesses        UserBranchAccess[]
   labelQueue            LabelPrintQueue[]
 
@@ -798,21 +826,27 @@ model UserRole {
 }
 
 model Category {
-  id                  String     @id @default(uuid()) @db.Uuid
-  companyId           String     @db.Uuid
-  company             Company    @relation(fields: [companyId], references: [id])
+  id                  String               @id @default(uuid()) @db.Uuid
+  companyId           String               @db.Uuid
+  company             Company              @relation(fields: [companyId], references: [id])
   name                String
   description         String?
-  parentId            String?    @db.Uuid
-  parent              Category?  @relation("CategoryTree", fields: [parentId], references: [id])
-  children            Category[] @relation("CategoryTree")
-  active              Boolean    @default(true)
-  sortOrder           Int        @default(0)
-  createdAt           DateTime   @default(now())
-  updatedAt           DateTime   @updatedAt
+  parentId            String?              @db.Uuid
+  parent              Category?            @relation("CategoryTree", fields: [parentId], references: [id])
+  children            Category[]           @relation("CategoryTree")
+  active              Boolean              @default(true)
+  sortOrder           Int                  @default(0)
+  targetMargin        Decimal?             @db.Decimal(7, 2)
+  roundingMode        RoundingMode?
+  roundingCustom      Decimal?             @db.Decimal(14, 2)
+  roundingDirection   RoundingDirection?
+  psychologicalEnding PsychologicalEnding?
+  priceUpdateMode     PriceUpdateMode?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
   deletedAt           DateTime?
-  products            Product[]  @relation("ProductCategory")
-  subcategoryProducts Product[]  @relation("ProductSubcategory")
+  products            Product[]            @relation("ProductCategory")
+  subcategoryProducts Product[]            @relation("ProductSubcategory")
 
   @@unique([companyId, name, parentId])
   @@index([companyId, active])
@@ -834,17 +868,22 @@ model Brand {
   @@index([companyId, active])
 }
 
-
 model ProductFamily {
-  id          String    @id @default(uuid()) @db.Uuid
-  companyId   String    @db.Uuid
-  company     Company   @relation(fields: [companyId], references: [id])
-  name        String
-  description String?
-  active      Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  products    Product[]
+  id                  String               @id @default(uuid()) @db.Uuid
+  companyId           String               @db.Uuid
+  company             Company              @relation(fields: [companyId], references: [id])
+  name                String
+  description         String?
+  active              Boolean              @default(true)
+  targetMargin        Decimal?             @db.Decimal(7, 2)
+  roundingMode        RoundingMode?
+  roundingCustom      Decimal?             @db.Decimal(14, 2)
+  roundingDirection   RoundingDirection?
+  psychologicalEnding PsychologicalEnding?
+  priceUpdateMode     PriceUpdateMode?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  products            Product[]
 
   @@unique([companyId, name])
   @@index([companyId, active, name])
@@ -880,6 +919,12 @@ model Product {
   taxRate                 Decimal                @default(21) @db.Decimal(5, 2)
   imageUrl                String?
   active                  Boolean                @default(true)
+  targetMargin            Decimal?               @db.Decimal(7, 2)
+  roundingMode            RoundingMode?
+  roundingCustom          Decimal?               @db.Decimal(14, 2)
+  roundingDirection       RoundingDirection?
+  psychologicalEnding     PsychologicalEnding?
+  priceUpdateMode         PriceUpdateMode?
   createdAt               DateTime               @default(now())
   updatedAt               DateTime               @updatedAt
   deletedAt               DateTime?
@@ -929,6 +974,10 @@ model BranchProduct {
   cost             Decimal  @default(0) @db.Decimal(14, 2)
   salePrice        Decimal  @default(0) @db.Decimal(14, 2)
   margin           Decimal  @default(0) @db.Decimal(9, 2)
+  targetMargin     Decimal? @db.Decimal(7, 2)
+  calculatedPrice  Decimal? @db.Decimal(14, 2)
+  automaticPricing Boolean  @default(true)
+  manualPrice      Boolean  @default(false)
   stockMinimum     Decimal  @default(0) @db.Decimal(14, 3)
   enabled          Boolean  @default(true)
   posFavorite      Boolean  @default(false)
@@ -951,6 +1000,11 @@ model PriceHistory {
   oldPrice         Decimal      @db.Decimal(14, 2)
   newPrice         Decimal      @db.Decimal(14, 2)
   percentageChange Decimal      @default(0) @db.Decimal(9, 2)
+  calculatedPrice  Decimal?     @db.Decimal(14, 2)
+  targetMargin     Decimal?     @db.Decimal(7, 2)
+  actualMargin     Decimal?     @db.Decimal(9, 2)
+  actualMarkup     Decimal?     @db.Decimal(9, 2)
+  roundingRule     String?
   source           ChangeSource @default(MANUAL)
   changedByUserId  String       @db.Uuid
   product          Product      @relation(fields: [productId], references: [id])
@@ -968,6 +1022,7 @@ model CostHistory {
   oldCost          Decimal      @db.Decimal(14, 2)
   newCost          Decimal      @db.Decimal(14, 2)
   percentageChange Decimal      @default(0) @db.Decimal(9, 2)
+  supplierId       String?      @db.Uuid
   source           ChangeSource @default(MANUAL)
   changedByUserId  String       @db.Uuid
   product          Product      @relation(fields: [productId], references: [id])
@@ -1100,24 +1155,24 @@ model Supplier {
 }
 
 model SupplierProduct {
-  id                  String              @id @default(uuid()) @db.Uuid
-  supplierId          String              @db.Uuid
-  productId           String              @db.Uuid
-  supplier            Supplier            @relation(fields: [supplierId], references: [id])
-  product             Product             @relation(fields: [productId], references: [id])
-  supplierCode        String?
-  supplierDescription String?
-  supplierBarcode     String?
-  unitsPerCase        Int?
-  lastCost            Decimal?            @db.Decimal(14, 2)
-  minimumOrderQuantity Decimal?           @db.Decimal(14, 3)
-  preferredSupplier    Boolean            @default(false)
-  lastPurchaseAt      DateTime?
-  active              Boolean             @default(true)
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
-  orderItems          PurchaseOrderItem[]
-  purchaseItems       PurchaseItem[]
+  id                   String              @id @default(uuid()) @db.Uuid
+  supplierId           String              @db.Uuid
+  productId            String              @db.Uuid
+  supplier             Supplier            @relation(fields: [supplierId], references: [id])
+  product              Product             @relation(fields: [productId], references: [id])
+  supplierCode         String?
+  supplierDescription  String?
+  supplierBarcode      String?
+  unitsPerCase         Int?
+  lastCost             Decimal?            @db.Decimal(14, 2)
+  minimumOrderQuantity Decimal?            @db.Decimal(14, 3)
+  preferredSupplier    Boolean             @default(false)
+  lastPurchaseAt       DateTime?
+  active               Boolean             @default(true)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  orderItems           PurchaseOrderItem[]
+  purchaseItems        PurchaseItem[]
 
   @@unique([supplierId, productId])
   @@unique([supplierId, supplierCode])

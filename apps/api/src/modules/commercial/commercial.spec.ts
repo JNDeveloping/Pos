@@ -2,8 +2,8 @@ import { Prisma, RoundingMode } from '@prisma/client';
 import { markup, roundPrice } from './commercial.module';
 
 describe('política comercial', () => {
-  it('calcula markup sobre costo de forma consistente', () => {
-    expect(markup(1000, 40).toString()).toBe('1400');
+  it('calcula precio desde margen objetivo, no desde markup', () => {
+    expect(markup(1000, 40).toDecimalPlaces(2).toString()).toBe('1666.67');
   });
   it.each([
     [RoundingMode.NONE, '1347', '1347'],

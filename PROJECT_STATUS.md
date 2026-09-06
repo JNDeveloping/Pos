@@ -341,3 +341,19 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
   proxy lo permite. En cada reconexión renuevan el JWT y muestran el estado/error real sin bloquear una venta.
 - Apache debe tener `proxy_http` y `proxy_wstunnel`; el manual incluye un `curl` de handshake para distinguir proxy,
   servicio detenido y respuesta HTML incorrecta. No hubo migración ni cambio de permisos.
+
+## Productos V2 y precios — 2026-09-06
+
+- `PriceCalculationService` es la autoridad para precio desde margen objetivo, margen real, markup, múltiplos de $10 a
+  $1.000/personalizado, dirección y terminaciones 00/50/90/99. Usa `Prisma.Decimal`; margen y markup ya no se confunden.
+- Las reglas se resuelven campo por campo en el orden producto → familia → categoría → global. Configuración incorpora
+  **Reglas de costos y precios** y deja `SUGGEST` como política inicial segura ante cambios de costo.
+- La actualización por sucursal guarda precio matemático, objetivo, margen/markup real y regla en historial; todo cambio
+  final encola etiqueta. Importación calcula precio cuando recibe costo sin precio y Compras reutiliza el mismo servicio:
+  `AUTO` actualiza/historiza/encola, mientras `SUGGEST` y `KEEP` preservan el precio y guardan la sugerencia.
+- Administración móvil consulta `/pricing/quote`, muestra la misma sugerencia del backend y permite aplicar, conservar o
+  indicar precio manual. Productos permite filtrar y visualizar precios pendientes de impresión; POS continúa consumiendo
+  únicamente el precio final persistido de la sucursal.
+- La migración aditiva `20260906120000_product_pricing_v2` amplía reglas e historiales sin reescribir precios existentes.
+  Pendiente antes de producción: aplicar las 23 migraciones en PostgreSQL de staging y probar compra/importación masiva
+  con datos reales; los registros anteriores conservan su margen histórico hasta su próxima actualización.
