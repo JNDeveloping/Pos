@@ -36,7 +36,10 @@ export function paymentSummary(total: number, rows: { amount: number; receivedAm
   const paid = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
   return {
     remaining: Math.round((total - paid) * 100) / 100,
-    change: rows.reduce((sum, row) => sum + (row.isCash ? Math.max(0, Number(row.receivedAmount ?? row.amount) - row.amount) : 0), 0),
+    change: rows.reduce(
+      (sum, row) => sum + (row.isCash ? Math.max(0, Number(row.receivedAmount ?? row.amount) - row.amount) : 0),
+      0,
+    ),
   };
 }
 export function addProductToCart(lines: CartLine[], product: PosProduct, quantity = 1) {
@@ -86,6 +89,7 @@ export const POS_SHORTCUTS = {
   F5: 'SUSPEND',
   F6: 'RESUME',
   F7: 'DISCOUNT',
+  F8: 'CHECK_PRICE',
   F9: 'PRICE',
   F10: 'REMOVE',
   F11: 'RECENT',

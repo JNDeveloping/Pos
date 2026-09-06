@@ -44,7 +44,7 @@ type CashMovement = { id: string; kind: 'INCOME' | 'EXPENSE' | 'WITHDRAWAL'; amo
 type CashSummary = { openingAmount: string; cashSales: string; movementImpact: string; expectedCash: string; paymentBreakdown: { kind: string; name: string; total: string }[]; movements: CashMovement[] };
 type PosAppearance = { background?: string; backgroundOpacity?: number; backgroundOverlay?: string; backgroundBlur?: number; backgroundPosition?: string };
 type Suspended = { id: string; at: string; cashier: string; branchId?: string; cart: CartLine[] };
-type Modal = 'help' | 'search' | 'edit' | 'discount' | 'quickSale' | 'suspended' | 'utilities' | 'payment' | 'cashMovement' | 'closeCash' | null;
+type Modal = 'help' | 'search' | 'priceCheck' | 'edit' | 'discount' | 'quickSale' | 'suspended' | 'utilities' | 'payment' | 'cashMovement' | 'closeCash' | null;
 const money = (value: number) => value.toLocaleString('es-AR', { style: 'currency', currency: 'ARS' });
 const isFractional = (line: Pick<CartLine, 'isWeighted' | 'unitType'>) => line.isWeighted || line.unitType !== 'UNIT';
 const quantity = (line: CartLine) =>
@@ -405,6 +405,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
           ({
             HELP: () => setModal('help'),
             SEARCH: () => scanner.current?.focus(),
+            CHECK_PRICE: () => setModal('priceCheck'),
             QUANTITY: () => openEdit('edit'),
             PAY: () => cart.length && setModal('payment'),
             SUSPEND: suspend,
@@ -666,7 +667,9 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
               ['F5', 'Suspender'],
               ['F6', 'Recuperar'],
               ['F7', 'Descuento'],
-              ['F12', 'Utilidades'],
+              ['F8', 'Ver precio'],
+              ['F9', 'Precio'],
+              ['F10', 'Borrar'],
             ].map(([key, label]) => (
               <button key={key} onClick={() => dispatchEvent(new KeyboardEvent('keydown', { key }))}>
                 <kbd>{key}</kbd>
@@ -743,6 +746,7 @@ export function Pos({ me, branches, branchId, onBranchChange }: { me: Me; branch
           }}
         />
       )}
+      {modal === 'priceCheck' && branch && <PriceChecker branchId={branch.id} close={() => { setModal(null); focusScanner(); }} />}
       {modal === 'help' && (
         <HelpModal
           close={() => {
@@ -903,6 +907,18 @@ function CashMovementModal({ summary, canCreate, close, save }: { summary?: Cash
   const [saving, setSaving] = useState(false);
   const labels = { INCOME: 'Ingreso', EXPENSE: 'Gasto', WITHDRAWAL: 'Retiro' };
   return <ModalFrame title="Movimientos de caja" close={close}><div className="pos-form"><div className="cash-close-summary"><span>Efectivo esperado<b>{money(Number(summary?.expectedCash ?? 0))}</b></span><span>Movimientos<b>{summary?.movements.length ?? 0}</b></span></div>{canCreate && <form className="pos-form" onSubmit={async (event) => { event.preventDefault(); setSaving(true); try { await save(kind, Number(amount), reason); setAmount(''); setReason(''); } finally { setSaving(false); } }}><label>Tipo<select value={kind} onChange={(event) => setKind(event.target.value as CashMovement['kind'])}><option value="INCOME">Ingreso de efectivo</option><option value="EXPENSE">Gasto</option><option value="WITHDRAWAL">Retiro</option></select></label><label>Importe<input type="number" inputMode="decimal" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></label><label>Motivo<input minLength={3} maxLength={200} value={reason} onChange={(event) => setReason(event.target.value)} /></label><button className="pos-pay" disabled={saving || Number(amount) <= 0 || reason.trim().length < 3}>{saving ? 'REGISTRANDO…' : 'REGISTRAR MOVIMIENTO'}</button></form>}<div className="pos-results">{summary?.movements.map((movement) => <div className="rounded-xl border p-3" key={movement.id}><b>{labels[movement.kind]} · {money(Number(movement.amount))}</b><small className="block">{movement.reason} · {new Date(movement.createdAt).toLocaleString('es-AR')} · origen {movement.origin}</small></div>)}{summary && !summary.movements.length && <p className="pos-feedback info">No hay movimientos manuales en esta sesión.</p>}</div></div></ModalFrame>;
+}
+function PriceChecker({ branchId, close }: { branchId: string; close: () => void }) {
+  const [query, setQuery] = useState(''), [product, setProduct] = useState<PosProduct>(), [error, setError] = useState(''), input = useRef<HTMLInputElement>(null);
+  async function check(event: React.FormEvent) {
+    event.preventDefault(); const term = query.trim(); if (!term) return;
+    try {
+      const found = /^\d{3,64}$/.test(term) ? await api<PosProduct>(`/pos/products/by-barcode/${encodeURIComponent(term)}?branchId=${branchId}`) : (await api<PosProduct[]>(`/pos/products/search?branchId=${branchId}&q=${encodeURIComponent(term)}`))[0];
+      if (!found) throw new Error('Producto no encontrado');
+      setProduct(found); setError(''); setQuery(''); input.current?.focus();
+    } catch (reason) { setProduct(undefined); setError((reason as Error).message); }
+  }
+  return <ModalFrame title="Verificador de precios · F8" close={close}><form className="pos-search" onSubmit={check}><Barcode/><input ref={input} autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Escaneá un código o escribí un producto"/><button><Search/></button></form>{error && <p className="pos-feedback error">{error}</p>}{product ? <section className="price-check-result"><small>{product.internalCode} · {product.category ?? 'Sin categoría'}</small><h3>{product.name}</h3><strong>{money(Number(product.price))}</strong><p>Stock disponible: <b>{product.available.toLocaleString('es-AR')}</b>{product.isWeighted ? ' · Precio por kg' : ''}</p></section> : <div className="pos-empty"><Barcode size={52}/><h3>Escaneá un producto</h3><p>La consulta no lo agrega a la venta.</p></div>}</ModalFrame>;
 }
 function SearchModal({
   results,

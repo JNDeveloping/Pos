@@ -357,3 +357,16 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 - La migración aditiva `20260906120000_product_pricing_v2` amplía reglas e historiales sin reescribir precios existentes.
   Pendiente antes de producción: aplicar las 23 migraciones en PostgreSQL de staging y probar compra/importación masiva
   con datos reales; los registros anteriores conservan su margen histórico hasta su próxima actualización.
+
+## Interfaz comercial compacta — 2026-09-06
+
+- Auditoría previa: se conservan servicios y flujos transaccionales de POS, precios, stock, compras, caja, proveedores,
+  usuarios y móvil; se mejoran Layout/POS/Productos/Stock/Compras existentes. Clientes/cuenta corriente, reportes PDF y
+  servidor local no se simulan ni se crean como pantallas vacías porque esos dominios todavía no existen completos.
+- El panel adopta una superficie de escritorio compacta: header oscuro con accesos principales, sucursal, usuario, reloj y
+  conexión; sidebar de 228 px, tablas densas, controles bajos, sombras mínimas y área útil ampliada hasta 1760 px.
+- POS reduce alturas, radios y espacios para 1366×768, mantiene scanner/teclado y agrega un verificador de precios F8 que
+  consulta el catálogo vigente sin modificar el carrito. F9 conserva la edición autorizada de precio para no romper el
+  atajo operativo existente.
+- La interfaz distingue conexión con la API/nube real. No muestra un estado LOCAL ficticio: quedará disponible cuando exista
+  el servidor local solicitado para una etapa futura. No hubo migración ni cambio de permisos en esta etapa visual.
