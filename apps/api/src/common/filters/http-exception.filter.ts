@@ -1,9 +1,13 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
+import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 @Catch()
 export class ApiExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(ApiExceptionFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost) {
-    const response = host.switchToHttp().getResponse();
+    const http = host.switchToHttp();
+    const response = http.getResponse();
+    const request = http.getRequest<{ method?: string; originalUrl?: string; user?: { id?: string } }>();
     let status = HttpStatus.INTERNAL_SERVER_ERROR,
       code = 'INTERNAL_ERROR',
       message = 'Ocurrió un error inesperado',
@@ -33,6 +37,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
           ? 'La operación ya fue procesada'
           : 'Ya existe un registro con esos datos';
     }
+    const context = `${request.method ?? 'UNKNOWN'} ${request.originalUrl ?? 'unknown'} user=${request.user?.id ?? 'anonymous'} status=${status} code=${code}`;
+    if (status >= 500) this.logger.error(context, exception instanceof Error ? exception.stack : undefined);
+    else this.logger.warn(context);
     response.status(status).json({ success: false, error: { code, message, ...(details ? { details } : {}) } });
   }
 }

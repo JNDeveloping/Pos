@@ -5,6 +5,7 @@ export type PosSettings = {
   showClock: boolean;
   favoriteColumns: number;
   confirmCancel: boolean;
+  autoPrintTicket: boolean;
 };
 export const DEFAULT_POS_SETTINGS: PosSettings = {
   mode: 'compact',
@@ -13,6 +14,7 @@ export const DEFAULT_POS_SETTINGS: PosSettings = {
   showClock: true,
   favoriteColumns: 4,
   confirmCancel: true,
+  autoPrintTicket: false,
 };
 export function loadPosSettings(branchId?: string): PosSettings {
   if (!branchId) return DEFAULT_POS_SETTINGS;

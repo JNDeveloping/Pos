@@ -37,6 +37,7 @@ import { StockModule, StockService } from '../stock/stock.module';
 import { CurrentSession, RequirePermissions, Session } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
 import { InvoiceAnalysisResult, InvoiceAnalysisService, ManualInvoiceAnalyzer } from './invoice-analysis.service';
+import { PriceCalculationService } from '../pricing/pricing.module';
 class OrderItemDto {
   @IsUUID() productId!: string;
   @IsOptional() @IsUUID() supplierProductId?: string;
@@ -100,6 +101,7 @@ class PurchasesService {
   constructor(
     private db: PrismaService,
     private stock: StockService,
+    private pricing: PriceCalculationService,
   ) {}
   async context(s: Session, branchId: string, supplierId: string) {
     const [b, p] = await Promise.all([
@@ -335,7 +337,24 @@ class PurchasesService {
             where: { branchId_productId: { branchId: current.branchId, productId: item.productId } },
           });
           if (!bp || bp.cost.equals(item.unitCost)) continue;
-          await tx.branchProduct.update({ where: { id: bp.id }, data: { cost: item.unitCost } });
+          const quote = await this.pricing.quote(s.companyId, {
+            cost: item.unitCost.toString(),
+            productId: item.productId,
+          });
+          const nextPrice =
+            bp.automaticPricing && quote.priceUpdateMode === 'AUTO' ? quote.suggestedPrice : bp.salePrice;
+          const actualMargin = this.pricing.calculateMargin(item.unitCost, nextPrice);
+          await tx.branchProduct.update({
+            where: { id: bp.id },
+            data: {
+              cost: item.unitCost,
+              salePrice: nextPrice,
+              calculatedPrice: quote.calculatedPrice,
+              targetMargin: quote.targetMargin,
+              margin: actualMargin,
+              manualPrice: bp.automaticPricing && quote.priceUpdateMode === 'AUTO' ? false : bp.manualPrice,
+            },
+          });
           await tx.costHistory.create({
             data: {
               productId: item.productId,
@@ -344,9 +363,38 @@ class PurchasesService {
               newCost: item.unitCost,
               percentageChange: bp.cost.eq(0) ? 0 : item.unitCost.minus(bp.cost).div(bp.cost).mul(100),
               source: ChangeSource.PURCHASE,
+              supplierId: current.supplierId,
               changedByUserId: s.sub,
             },
           });
+          if (!bp.salePrice.equals(nextPrice)) {
+            await tx.priceHistory.create({
+              data: {
+                productId: item.productId,
+                branchId: current.branchId,
+                oldPrice: bp.salePrice,
+                newPrice: nextPrice,
+                percentageChange: bp.salePrice.eq(0) ? 0 : nextPrice.minus(bp.salePrice).div(bp.salePrice).mul(100),
+                calculatedPrice: quote.calculatedPrice,
+                targetMargin: quote.targetMargin,
+                actualMargin,
+                actualMarkup: this.pricing.calculateMarkup(item.unitCost, nextPrice),
+                roundingRule: quote.roundingRule,
+                source: ChangeSource.PURCHASE,
+                changedByUserId: s.sub,
+              },
+            });
+            await tx.labelPrintQueue.create({
+              data: {
+                companyId: s.companyId,
+                branchId: current.branchId,
+                productId: item.productId,
+                userId: s.sub,
+                oldPrice: bp.salePrice,
+                newPrice: nextPrice,
+              },
+            });
+          }
           await tx.supplierProduct.upsert({
             where: { supplierId_productId: { supplierId: current.supplierId, productId: item.productId } },
             update: { lastCost: item.unitCost, lastPurchaseAt: new Date() },
