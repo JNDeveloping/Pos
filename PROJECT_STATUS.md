@@ -370,3 +370,9 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
   atajo operativo existente.
 - La interfaz distingue conexión con la API/nube real. No muestra un estado LOCAL ficticio: quedará disponible cuando exista
   el servidor local solicitado para una etapa futura. No hubo migración ni cambio de permisos en esta etapa visual.
+
+## Informe exportable del estado actual — 2026-09-08
+
+- Se consolidó la explicación funcional y técnica del sistema en `docs/ESTADO_ACTUAL_SISTEMA.md` y su versión PDF, cubriendo
+  frontend, backend, modelos, integraciones, estado por módulo, limitaciones y riesgos prioritarios.
+- Es una entrega documental: no modifica código ejecutable, esquema, migraciones ni permisos.
