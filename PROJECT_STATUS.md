@@ -1,10 +1,26 @@
-# Estado técnico real — auditoría general 2026-09-05
+# Estado técnico real — auditoría general 2026-09-08
+
+## Estado normativo de la recodificación
+
+La clasificación detallada y el orden vinculante están en `RECODIFICATION_PLAN.md`; la evidencia se registra en
+`E2E_VALIDATION.md` y las decisiones incrementales en `CHANGELOG_RECODIFICATION.md`.
+
+- **DONE:** documentación de Fase 0, inventario de arquitectura, modelos, rutas, permisos y migraciones.
+- **PARTIAL:** Auth/RBAC, multisucursal, Productos, Pricing, POS, Caja, Compras, Proveedores, Stock, Etiquetas, móvil y
+  Caja en vivo. Tienen implementación y tests unitarios, pero no certificación E2E actual contra PostgreSQL.
+- **BLOCKED:** staging, aplicación real de las 23 migraciones y cuatro recorridos E2E. El contenedor no ofrece Docker,
+  `psql` ni credenciales de staging.
+- **NOT_STARTED:** Clientes/mayor de cuenta corriente, reportes avanzados, alertas programadas, mensajes a caja,
+  impresión nativa y servidor local+nube.
+
+No se usa DONE como sinónimo de “hay código” o “pasan mocks”. Hasta superar Fase 0 no se avanza a una reconstrucción
+masiva ni se presenta el sistema completo como certificado para producción.
 
 ## Veredicto ejecutivo
 
 El repositorio contiene un POS/ERP existente, amplio y compilable. Producto, stock, compras y venta tienen backend real y
 persistencia Prisma; no son maquetas aisladas. Aun así, **ningún recorrido comercial queda certificado de punta a punta
-en esta auditoría** porque el entorno no dispone de PostgreSQL/Redis ni Docker para aplicar las 18 migraciones y ejecutar
+en esta auditoría** porque el entorno no dispone de PostgreSQL/Redis ni Docker para aplicar las 23 migraciones y ejecutar
 HTTP/e2e reales. La cobertura actual protege cálculos y políticas puntuales, pero no prueba una venta concurrente completa.
 
 El flujo más maduro es producto → configuración de sucursal → catálogo POS → carrito → cobro → venta/pagos → movimiento
@@ -19,8 +35,8 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 - `apps/api`: NestJS 11, guard JWT/RBAC global, Prisma 6, PostgreSQL y Redis tolerante a fallos.
 - API pública esperada en `/pos/api`; Nest usa `/api` y escucha internamente en `127.0.0.1:3002`.
 - La PWA sólo precachea shell/assets. No hay IndexedDB, caché de respuestas API ni fuente comercial offline.
-- Existen 22 migraciones inmutables. La última, `20260905230000_pos_live_events`, conserva una cronología operativa mínima
-  del POS para el monitor de cajas en vivo.
+- Existen 23 migraciones inmutables. La última, `20260906120000_product_pricing_v2`, agrega reglas heredables e historial
+  enriquecido de pricing sin reemplazar la cronología de Caja en vivo de la migración anterior.
 - `packages/shared` sigue reservado; los contratos frontend/backend continúan duplicados localmente.
 
 ## Mapa de datos y relaciones principales
@@ -155,7 +171,7 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 - Alias `/products`/`/admin/products`, `/suppliers`/`/admin/suppliers` y otros conservan compatibilidad pero duplican mapa.
 - `PriceLists` y endpoints existen sin navegación principal; `PriceListItem` carece de gestión completa.
 - `PosSettingsPage.tsx`, `loadPosSettings` y `savePosSettings` son una segunda fuente local frente a settings servidor.
-- Búsqueda global y campana del layout son decorativas.
+- La búsqueda global abre Productos con el término ingresado; la campana decorativa fue retirada del layout.
 - `SaleStatus.SUSPENDED` existe, pero los suspendidos actuales no usan `Sale` ni PostgreSQL.
 
 ## Dependencias entre módulos
@@ -180,8 +196,8 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 
 ## Verificaciones de esta auditoría
 
-- Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 22 SQL.
-- Se ejecutan como controles locales: lint, typecheck, 24 tests frontend, 61 tests backend, build y `check:release`.
+- Se revisaron App/rutas, páginas principales, servicios frontend, todos los módulos Nest, permisos, schema y 23 SQL.
+- Controles de Fase 0: lint, typecheck, 25 tests frontend, 67 tests backend, build y `check:release` aprobados.
 - PostgreSQL/Redis HTTP/e2e quedan **no ejecutados** por falta de servicios/credenciales en el entorno de auditoría.
 
 ## Estabilización de arquitectura — 2026-09-05
@@ -313,11 +329,11 @@ códigos potencialmente repetidos, fechas de reportes en UTC y ausencia de prueb
 - Proveedores dejó de exponer pestañas futuras simuladas y corrigió enlaces SPA/errores; el alta básica incluye WhatsApp y notas.
   Compras manuales dejó de cargar 100 productos y usa búsqueda backend de hasta 30 resultados con prevención de doble envío.
 - No hubo migraciones. La versión compila y sus reglas unitarias pasan, pero **no se declara certificada para producción** hasta
-  aplicar las 22 migraciones y completar el recorrido HTTP real con PostgreSQL: producto → stock → caja → venta → pago → cierre.
+  aplicar las 23 migraciones y completar el recorrido HTTP real con PostgreSQL: producto → stock → caja → venta → pago → cierre.
 
 ## Orden de trabajo recomendado (sin implementarlo ahora)
 
-1. Levantar PostgreSQL efímero, aplicar las 22 migraciones y crear smoke tests HTTP multi-tenant/WebSocket.
+1. Levantar PostgreSQL efímero, aplicar las 23 migraciones y crear smoke tests HTTP multi-tenant/WebSocket.
 2. Probar en orden: login → sucursal → terminal → caja → catálogo → pago mixto → venta → stock → ticket → anulación.
 3. Corregir permisos/errores de Configuración POS y la generación robusta de códigos de terminal.
 4. Desacoplar las cargas del bootstrap POS para tolerar fallos parciales.
