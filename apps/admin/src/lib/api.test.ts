@@ -52,7 +52,34 @@ describe('cliente API', () => {
       }),
     );
     await expect(api('/products')).rejects.toThrow('Sin conexión al servidor');
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(storage.removeItem).not.toHaveBeenCalled();
+  });
+
+  it('renueva también la sesión al restaurar /auth/me', async () => {
+    const storage = storageWith({ accessToken: 'expired', refreshToken: 'refresh' });
+    vi.stubGlobal('sessionStorage', storage);
+    vi.stubGlobal('localStorage', storageWith());
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).endsWith('/auth/refresh'))
+          return new Response(JSON.stringify({ accessToken: 'new-access', refreshToken: 'new-refresh' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        return new Headers(init?.headers).get('Authorization') === 'Bearer new-access'
+          ? new Response(JSON.stringify({ user: {}, permissions: [], company: {} }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          : new Response(JSON.stringify({ message: 'Unauthorized' }), {
+              status: 401,
+              headers: { 'Content-Type': 'application/json' },
+            });
+      }),
+    );
+    await expect(api('/auth/me')).resolves.toBeTruthy();
   });
 
   it('comparte un único refresh entre requests 401 concurrentes', async () => {

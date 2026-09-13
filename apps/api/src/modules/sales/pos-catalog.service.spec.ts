@@ -79,6 +79,24 @@ describe('PosCatalogService', () => {
     const db = database({});
     const service = new PosCatalogService(db as never);
     await expect(service.quickGroups(session, 'b')).resolves.toEqual([{ id: 'cat', name: 'Bebidas', icon: '', buttonSize: 'MEDIUM', kind: 'CATEGORY' }]);
-    expect(db.category.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 16 }));
+    expect(db.category.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 50 }));
+  });
+  it('prioritizes the frequent supermarket categories on touch access', async () => {
+    const db = database({});
+    db.category.findMany.mockResolvedValue([
+      { id: 'other', name: 'Otros' },
+      { id: 'cold', name: 'Fiambres' },
+      { id: 'fresh', name: 'Frutas y Verduras' },
+      { id: 'bakery', name: 'Panadería' },
+      { id: 'fire', name: 'Leña y Carbón' },
+    ]);
+    const groups = await new PosCatalogService(db as never).quickGroups(session, 'b');
+    expect(groups.map((group) => group.name)).toEqual([
+      'Frutas y Verduras',
+      'Panadería',
+      'Fiambres',
+      'Leña y Carbón',
+      'Otros',
+    ]);
   });
 });

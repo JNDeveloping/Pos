@@ -184,9 +184,16 @@ proxy de `/pos/api/` al puerto 3002, el fallback de React, la redirección `/pos
 Habilitar los módulos, incluir el snippet dentro del VirtualHost HTTPS y validar:
 
 ```bash
-sudo a2enmod alias proxy proxy_http rewrite headers
+sudo a2enmod alias proxy proxy_http proxy_wstunnel rewrite headers
 sudo apachectl configtest
 sudo systemctl reload apache2
+```
+
+Comprobar además el handshake de Socket.IO. La respuesta debe comenzar con `0{` y
+no debe ser HTML ni devolver 404/502:
+
+```bash
+curl -i 'https://grupolosnietos.com.ar/pos/api/socket.io/?EIO=4&transport=polling'
 ```
 
 Ejemplo:

@@ -8,6 +8,14 @@ export const currentRoute = () => {
   return `/${relative}`.replace(/\/$/, '') || '/';
 };
 
-export const navigate = (path: string) => {
-  window.location.href = appPath(path);
+export const navigate = (path: string, options?: { replace?: boolean }) => {
+  const destination = appPath(path);
+  if (options?.replace) window.history.replaceState({}, '', destination);
+  else window.history.pushState({}, '', destination);
+  window.dispatchEvent(new Event('popstate'));
+};
+
+export const subscribeToNavigation = (listener: () => void) => {
+  window.addEventListener('popstate', listener);
+  return () => window.removeEventListener('popstate', listener);
 };

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
-import { appPath } from '../lib/navigation';
+import { appPath, navigate } from '../lib/navigation';
 type Option = { id: string; name: string };
 type Product = { id: string; name: string; internalCode: string };
 type Item = {
@@ -16,6 +16,7 @@ export function PurchaseNew() {
   const [suppliers, setSuppliers] = useState<Option[]>([]),
     [branches, setBranches] = useState<Option[]>([]),
     [products, setProducts] = useState<Product[]>([]),
+    [productSearch, setProductSearch] = useState(''), [busy, setBusy] = useState(false),
     [items, setItems] = useState<Item[]>([
       {
         productId: '',
@@ -31,21 +32,26 @@ export function PurchaseNew() {
     void Promise.all([
       api<{ data: Option[] }>('/suppliers'),
       api<Option[]>('/branches'),
-      api<{ data: Product[] }>('/products?limit=100'),
     ])
-      .then(([s, b, p]) => {
+      .then(([s, b]) => {
         setSuppliers(s.data);
         setBranches(b);
-        setProducts(p.data);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e: Error) => setError(e.message));
   }, []);
+  useEffect(() => {
+    if (productSearch.trim().length < 2) { setProducts([]); return; }
+    const timer = window.setTimeout(() => void api<{ data: Product[] }>(`/products?limit=30&search=${encodeURIComponent(productSearch.trim())}`).then((result) => setProducts(result.data)).catch((e: Error) => setError(e.message)), 250);
+    return () => window.clearTimeout(timer);
+  }, [productSearch]);
   function update(index: number, patch: Partial<Item>) {
     setItems(items.map((item, i) => (i === index ? { ...item, ...patch } : item)));
   }
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
+    if (busy) return;
+    setBusy(true);
     try {
       await api('/purchases', {
         method: 'POST',
@@ -62,9 +68,10 @@ export function PurchaseNew() {
             .map((x) => ({ ...x, unitsPerCase: Number(x.unitsPerCase) || undefined })),
         }),
       });
-      location.href = appPath('/admin/purchases');
+      navigate('/admin/purchases');
     } catch (x) {
-      setError(String(x));
+      setError((x as Error).message);
+      setBusy(false);
     }
   }
   return (
@@ -146,6 +153,7 @@ export function PurchaseNew() {
           </button>
         </div>
         <div className="space-y-3">
+          <label className="block">Buscar producto<input className="mt-2 w-full" value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="Nombre, código interno, SKU o barcode (mínimo 2 caracteres)"/></label>
           {items.map((item, index) => (
             <div
               className="grid gap-3 rounded-xl bg-slate-50 p-3 lg:grid-cols-[1fr_100px_100px_120px_140px_44px]"
@@ -210,7 +218,7 @@ export function PurchaseNew() {
         </div>
       </section>
       <div className="flex justify-end">
-        <button className="btn-primary">Guardar para revisión</button>
+        <button className="btn-primary" disabled={busy || !items.some((item) => item.productId)}>{busy ? 'Guardando…' : 'Guardar para revisión'}</button>
       </div>
     </form>
   );
