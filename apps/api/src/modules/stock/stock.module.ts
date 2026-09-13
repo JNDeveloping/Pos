@@ -250,10 +250,11 @@ class StockController {
   ) {}
   @Get()
   @RequirePermissions('stock.view')
-  async list(@CurrentSession() s: Session, @Query('branchId') branchId?: string, @Query('search') search = '') {
+  async list(@CurrentSession() s: Session, @Query('branchId') branchId?: string, @Query('search') search = '', @Query('paged') paged?: string, @Query('page') rawPage = '1') {
     const effectiveBranchId = s.branchId ?? branchId;
-    const configs = await this.db.branchProduct.findMany({
-      where: {
+    const page = Math.max(1, Number(rawPage) || 1);
+    const pagination: { skip?: number; take: number } = paged === 'true' ? { skip: (page - 1) * 50, take: 50 } : { take: 500 };
+    const where: Prisma.BranchProductWhereInput = {
         branchId: effectiveBranchId,
         enabled: true,
         branch: { companyId: s.companyId, active: true, deletedAt: null },
@@ -269,11 +270,13 @@ class StockController {
               ]
             : undefined,
         },
-      },
-      include: { product: { include: { category: true, brand: true } } },
+      };
+    const [configs, total] = await Promise.all([this.db.branchProduct.findMany({
+      where,
+      include: { branch: { select: { id: true, name: true } }, product: { include: { category: true, brand: true } } },
       orderBy: { product: { name: 'asc' } },
-      take: 500,
-    });
+      ...pagination,
+    }), paged === 'true' ? this.db.branchProduct.count({ where }) : Promise.resolve(0)]);
     const [rows, locationRows] = await Promise.all([this.db.stock.findMany({
       where: {
         companyId: s.companyId,
@@ -283,7 +286,7 @@ class StockController {
     }), this.db.stockLocationBalance.findMany({ where: { companyId: s.companyId, branchId: effectiveBranchId, productId: { in: configs.map((config) => config.productId) } } })]);
     const stockByKey = new Map(rows.map((row) => [`${row.branchId}:${row.productId}`, row]));
     const locationByKey = new Map(locationRows.map((row) => [`${row.productId}:${row.location}`, Number(row.quantity)]));
-    return configs.map((config) => {
+    const data = configs.map((config) => {
       const stock = stockByKey.get(`${config.branchId}:${config.productId}`);
       const quantity = Number(stock?.quantity ?? 0),
         reserved = Number(stock?.reservedQuantity ?? 0),
@@ -297,6 +300,7 @@ class StockController {
         reservedQuantity: reserved,
         inTransitQuantity: Number(stock?.inTransitQuantity ?? 0),
         product: config.product,
+        branch: config.branch,
         availableQuantity: available,
         minimumStock: minimum,
         status: stockStatus(available, minimum),
@@ -305,6 +309,7 @@ class StockController {
         warehouseQuantity: locationByKey.get(`${config.productId}:WAREHOUSE`) ?? 0,
       };
     });
+    return paged === 'true' ? { data, meta: { page, total, pages: Math.ceil(total / 50) } } : data;
   }
   @Get('movements')
   @RequirePermissions('stock.movements')

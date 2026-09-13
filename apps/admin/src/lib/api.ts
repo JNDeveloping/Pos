@@ -18,6 +18,13 @@ type ApiErrorBody = { error?: { message?: string }; message?: string };
 type Tokens = { accessToken: string; refreshToken: string };
 let refreshInFlight: Promise<string> | undefined;
 
+export class ApiError extends Error {
+  constructor(message: string, readonly status?: number, readonly code?: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'ApiError';
+  }
+}
+
 async function readApiBody(response: Response) {
   const raw = await response.text();
   if (!raw) return undefined;
@@ -44,7 +51,7 @@ export async function api<T>(path: string, options: RequestInit = {}) {
     requestHeaders.set('Content-Type', 'application/json');
   if (token) requestHeaders.set('Authorization', `Bearer ${token}`);
   let response = await request(`${API}${path}`, { ...options, headers: requestHeaders });
-  if (response.status === 401 && !path.startsWith('/auth/')) {
+  if (response.status === 401 && path !== '/auth/login' && path !== '/auth/refresh') {
     token = await refreshAccessToken();
     requestHeaders.set('Authorization', `Bearer ${token}`);
     response = await request(`${API}${path}`, { ...options, headers: requestHeaders });
@@ -52,17 +59,25 @@ export async function api<T>(path: string, options: RequestInit = {}) {
   const body = await readApiBody(response);
   if (!response.ok) {
     const error = body as ApiErrorBody | undefined;
-    throw new Error(error?.error?.message ?? error?.message ?? `Error HTTP ${response.status}`);
+    const nested = error?.error as { message?: string; code?: string } | undefined;
+    throw new ApiError(nested?.message ?? error?.message ?? `Error HTTP ${response.status}`, response.status, nested?.code);
   }
   return body as T;
 }
 
 async function request(url: string, options: RequestInit) {
-  try {
-    return await fetch(url, options);
-  } catch (cause) {
-    throw new Error('Sin conexión al servidor. Verificá la red e intentá nuevamente.', { cause });
+  const attempts = !options.method || options.method.toUpperCase() === 'GET' ? 2 : 1;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await fetch(url, options);
+    } catch (cause) {
+      if (options.signal?.aborted) throw cause;
+      if (attempt + 1 === attempts)
+        throw new ApiError('Sin conexión al servidor. Verificá la red e intentá nuevamente.', undefined, 'NETWORK_ERROR', { cause });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
   }
+  throw new ApiError('No se pudo completar la solicitud.', undefined, 'NETWORK_ERROR');
 }
 
 function refreshAccessToken() {
@@ -84,7 +99,7 @@ async function performRefresh() {
   const body = (await readApiBody(response)) as Tokens | ApiErrorBody;
   if (!response.ok) {
     clearTokens();
-    navigate('/login');
+    navigate('/login', { replace: true });
     throw new Error((body as ApiErrorBody).error?.message ?? 'La sesión expiró');
   }
   const tokens = body as Tokens;

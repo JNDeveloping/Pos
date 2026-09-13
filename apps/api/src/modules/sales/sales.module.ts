@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   Get,
@@ -12,31 +13,37 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { Prisma, SaleStatus, StockMovementType } from '@prisma/client';
+import { CashMovementKind, PaymentMethodKind, Prisma, SaleStatus, StockMovementType, SuspendedSaleStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  ArrayMaxSize,
   IsBoolean,
   IsInt,
+  IsEnum,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
   Min,
   MinLength,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
-import { CurrentSession, RequirePermissions, Session } from '../../common/auth';
+import { CurrentSession, RequirePermissions, Session, sessionCan } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
 import { StockModule, StockService } from '../stock/stock.module';
 
 class SaleLineDto {
-  @IsUUID() productId!: string;
+  @IsOptional() @IsUUID() productId?: string;
+  @IsOptional() @IsString() @MaxLength(120) description?: string;
   @IsNumber() @Min(0.001) quantity!: number;
   @IsOptional() @IsNumber() @Min(0) discountPercent?: number;
   @IsOptional() @IsNumber() @Min(0) discountAmount?: number;
   @IsOptional() @IsNumber() @Min(0) manualPrice?: number;
   @IsOptional() @IsNumber() @Min(0) expectedUnitPrice?: number;
+  @IsOptional() @IsString() @MaxLength(200) note?: string;
 }
 class PaymentDto {
   @IsUUID() paymentMethodId!: string;
@@ -72,6 +79,7 @@ class ConfigDto {
   @IsString() @MinLength(2) name!: string;
   @IsOptional() @IsBoolean() active?: boolean;
   @IsOptional() @IsBoolean() requiresReference?: boolean;
+  @IsOptional() @IsEnum(PaymentMethodKind) kind?: PaymentMethodKind;
   @IsOptional() @IsInt() sortOrder?: number;
 }
 class TerminalDto {
@@ -79,6 +87,8 @@ class TerminalDto {
   @IsString() @MinLength(1) code!: string;
   @IsString() @MinLength(2) name!: string;
   @IsOptional() @IsBoolean() active?: boolean;
+  @IsOptional() @IsString() printerName?: string;
+  @IsOptional() @IsObject() posConfig?: Record<string, unknown>;
 }
 class OpenCashSessionDto {
   @IsUUID() branchId!: string;
@@ -92,6 +102,11 @@ class CloseCashSessionDto {
   @IsNumber() @Min(0) closingAmount!: number;
   @IsOptional() @IsString() closingNote?: string;
 }
+class CashMovementDto {
+  @IsEnum(CashMovementKind) kind!: CashMovementKind;
+  @IsNumber() @Min(0.01) amount!: number;
+  @IsString() @MinLength(3) @MaxLength(200) reason!: string;
+}
 class QuickGroupDto {
   @IsUUID() branchId!: string;
   @IsString() @MinLength(2) name!: string;
@@ -100,6 +115,69 @@ class QuickGroupDto {
   @IsOptional() @IsString() buttonSize?: string;
   @IsOptional() @IsBoolean() active?: boolean;
   @IsArray() @IsUUID(undefined, { each: true }) productIds!: string[];
+}
+class SuspendSaleDto {
+  @IsUUID() branchId!: string;
+  @IsUUID() terminalId!: string;
+  @IsUUID() cashSessionId!: string;
+  @IsArray() @ArrayMaxSize(200) @IsObject({ each: true }) cart!: Record<string, unknown>[];
+}
+const suspendedString = (value: unknown, name: string, maximum = 200) => {
+  if (typeof value !== 'string' || !value.trim() || value.length > maximum)
+    throw new BadRequestException(`La venta suspendida contiene ${name} inválido`);
+  return value.trim();
+};
+const suspendedNumber = (value: unknown, name: string, minimum = 0) => {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value.trim()) ? Number(value) : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed < minimum)
+    throw new BadRequestException(`La venta suspendida contiene ${name} inválido`);
+  return parsed;
+};
+export function sanitizeSuspendedCart(input: Record<string, unknown>[]) {
+  if (!input.length) throw new BadRequestException('No se puede suspender una venta vacía');
+  const snapshot = input.map((line) => {
+    const quickSale = line.quickSale === true,
+      price = suspendedNumber(line.price, 'un precio'),
+      manualPrice = line.manualPrice === undefined ? undefined : suspendedNumber(line.manualPrice, 'un precio manual'),
+      quantity = suspendedNumber(line.quantity, 'una cantidad', 0.001),
+      discountPercent = suspendedNumber(line.discountPercent ?? 0, 'un descuento'),
+      discountAmount = suspendedNumber(line.discountAmount ?? 0, 'un descuento');
+    if (discountPercent > 100) throw new BadRequestException('El descuento de una venta suspendida supera 100%');
+    return {
+      id: suspendedString(line.id, 'un identificador', 160),
+      ...(quickSale ? {} : { productId: suspendedString(line.productId, 'un producto', 36) }),
+      branchProductId: quickSale ? '' : suspendedString(line.branchProductId, 'una configuración de producto', 36),
+      quickSale,
+      name: suspendedString(line.name, 'una descripción', 120),
+      shortName: typeof line.shortName === 'string' ? line.shortName.slice(0, 120) : undefined,
+      internalCode: suspendedString(line.internalCode, 'un código', 80),
+      barcode: typeof line.barcode === 'string' ? line.barcode.slice(0, 80) : undefined,
+      brand: typeof line.brand === 'string' ? line.brand.slice(0, 120) : undefined,
+      categoryId: typeof line.categoryId === 'string' ? line.categoryId.slice(0, 36) : undefined,
+      category: typeof line.category === 'string' ? line.category.slice(0, 120) : undefined,
+      presentation: typeof line.presentation === 'string' ? line.presentation.slice(0, 80) : undefined,
+      unitType: suspendedString(line.unitType, 'una unidad', 30),
+      price: String(price),
+      available: suspendedNumber(line.available ?? 0, 'stock'),
+      stockMinimum: suspendedNumber(line.stockMinimum ?? 0, 'stock mínimo'),
+      isWeighted: line.isWeighted === true,
+      posFavorite: line.posFavorite === true,
+      allowManualPrice: line.allowManualPrice === true,
+      allowNegativeStock: line.allowNegativeStock === true,
+      quantity,
+      originalPrice: suspendedNumber(line.originalPrice ?? price, 'un precio original'),
+      manualPrice,
+      discountPercent,
+      discountAmount,
+      note: typeof line.note === 'string' ? line.note.slice(0, 200) : undefined,
+    };
+  });
+  const total = snapshot.reduce((sum, line) => {
+    const subtotal = new Prisma.Decimal(line.manualPrice ?? line.price).mul(line.quantity)
+      .mul(new Prisma.Decimal(1).minus(new Prisma.Decimal(line.discountPercent).div(100))).minus(line.discountAmount);
+    return sum.plus(Prisma.Decimal.max(0, subtotal));
+  }, new Prisma.Decimal(0));
+  return { snapshot, itemCount: snapshot.length, total: total.toDecimalPlaces(2) };
 }
 
 @Injectable()
@@ -131,7 +209,7 @@ export class PriceResolutionService {
 }
 
 @Injectable()
-class SalesService {
+export class SalesService {
   constructor(
     private db: PrismaService,
     private stock: StockService,
@@ -147,9 +225,11 @@ class SalesService {
       return this.visible(s, previous);
     }
     if (!dto.items.length) throw new BadRequestException('La venta no tiene productos');
-    if (new Set(dto.items.map((item) => item.productId)).size !== dto.items.length)
+    const registeredIds = dto.items.flatMap((item) => item.productId ? [item.productId] : []);
+    if (new Set(registeredIds).size !== registeredIds.length)
       throw new BadRequestException('Un producto no puede repetirse en varias líneas');
-    return this.db.$transaction(
+    try {
+      return await this.db.$transaction(
       async (tx) => {
         const branch = await tx.branch.findFirst({ where: { id: dto.branchId, companyId: s.companyId, active: true } });
         const terminal = await tx.terminal.findFirst({
@@ -171,6 +251,22 @@ class SalesService {
         if (branch.requireCashOpen && !cashSession) throw new BadRequestException('Debe abrir la caja antes de vender');
         const lines = [];
         for (const input of dto.items) {
+          if (!input.productId) {
+            if (!sessionCan(s, 'sales.manualPrice')) throw new BadRequestException('No tiene permiso para venta rápida');
+            const name = input.description?.trim();
+            if (!name) throw new BadRequestException('La venta rápida requiere una descripción');
+            if (!(input.manualPrice && input.manualPrice > 0))
+              throw new BadRequestException('La venta rápida requiere un precio mayor que cero');
+            const price = new Prisma.Decimal(input.manualPrice);
+            const pct = new Prisma.Decimal(input.discountPercent ?? 0);
+            const amount = new Prisma.Decimal(input.discountAmount ?? 0);
+            if ((pct.gt(0) || amount.gt(0)) && !sessionCan(s, 'sales.discountItem'))
+              throw new BadRequestException('No tiene permiso para descuento por ítem');
+            const subtotal = price.mul(input.quantity).mul(new Prisma.Decimal(1).minus(pct.div(100))).minus(amount);
+            if (subtotal.lt(0)) throw new BadRequestException('Descuento inválido');
+            lines.push({ input, config: null, price, originalPrice: price, pct, amount, subtotal, quickName: name });
+            continue;
+          }
           const { config, price: resolved } = await this.prices.resolve(
             tx,
             s,
@@ -199,7 +295,7 @@ class SalesService {
           const gross = price.mul(input.quantity),
             subtotal = gross.mul(new Prisma.Decimal(1).minus(pct.div(100))).minus(amount);
           if (subtotal.lt(0)) throw new BadRequestException('Descuento inválido');
-          lines.push({ input, config, price, originalPrice: resolved, pct, amount, subtotal });
+          lines.push({ input, config, price, originalPrice: resolved, pct, amount, subtotal, quickName: undefined });
         }
         const subtotal = lines.reduce((sum, l) => sum.plus(l.subtotal), new Prisma.Decimal(0));
         const salePct = new Prisma.Decimal(dto.discountPercent ?? 0);
@@ -224,7 +320,11 @@ class SalesService {
           const method = methods.find((m) => m.id === payment.paymentMethodId)!;
           if (method.requiresReference && !payment.reference)
             throw new BadRequestException(`${method.name} requiere referencia`);
-          if (method.code === 'CASH' && (payment.receivedAmount ?? payment.amount) < payment.amount)
+          if (method.kind === PaymentMethodKind.ACCOUNT && !sessionCan(s, 'sales.accountCredit'))
+            throw new BadRequestException('No tiene permiso para cobrar a cuenta corriente');
+          if (method.kind === PaymentMethodKind.ACCOUNT && !payment.reference?.trim())
+            throw new BadRequestException('Cuenta corriente requiere identificar al cliente o cuenta');
+          if (method.kind === PaymentMethodKind.CASH && (payment.receivedAmount ?? payment.amount) < payment.amount)
             throw new BadRequestException('Efectivo recibido insuficiente');
         }
         const numbered = await tx.terminal.update({
@@ -233,7 +333,7 @@ class SalesService {
         });
         const saleNumber = `${branch.code}-${terminal.code}-${String(numbered.nextSaleNumber).padStart(8, '0')}`;
         const costTotal = lines.reduce(
-          (sum, l) => sum.plus(l.config.cost.mul(l.input.quantity)),
+          (sum, l) => sum.plus(l.config ? l.config.cost.mul(l.input.quantity) : 0),
           new Prisma.Decimal(0),
         );
         const sale = await tx.sale.create({
@@ -256,17 +356,18 @@ class SalesService {
             items: {
               create: lines.map((l) => ({
                 productId: l.input.productId,
-                branchProductId: l.config.id,
-                productNameSnapshot: l.config.product.name,
-                barcodeSnapshot: l.config.product.barcodes.find((b) => b.isPrimary)?.barcode,
+                branchProductId: l.config?.id,
+                productNameSnapshot: l.config?.product.name ?? l.quickName ?? 'Venta rápida',
+                barcodeSnapshot: l.config?.product.barcodes.find((b) => b.isPrimary)?.barcode,
                 quantity: l.input.quantity,
                 unitPrice: l.price,
                 originalUnitPrice: l.originalPrice,
-                costSnapshot: l.config.cost,
+                costSnapshot: l.config?.cost ?? 0,
                 discountPercent: l.pct,
                 discountAmount: l.amount,
                 subtotal: l.subtotal,
-                taxRateSnapshot: l.config.product.taxRate,
+                taxRateSnapshot: l.config?.product.taxRate ?? 0,
+                note: l.input.note?.trim() || undefined,
               })),
             },
             payments: {
@@ -276,8 +377,9 @@ class SalesService {
                 return {
                   paymentMethodId: p.paymentMethodId,
                   amount: p.amount,
-                  receivedAmount: method.code === 'CASH' ? received : undefined,
-                  changeAmount: method.code === 'CASH' ? received.minus(p.amount) : undefined,
+                  cashImpact: method.kind === PaymentMethodKind.CASH ? p.amount : 0,
+                  receivedAmount: method.kind === PaymentMethodKind.CASH ? received : undefined,
+                  changeAmount: method.kind === PaymentMethodKind.CASH ? received.minus(p.amount) : undefined,
                   reference: p.reference,
                 };
               }),
@@ -286,7 +388,7 @@ class SalesService {
           include: { items: true, payments: { include: { paymentMethod: true } } },
         });
         for (const l of lines)
-          await this.stock.change(
+          if (l.input.productId) await this.stock.change(
             tx,
             s,
             dto.branchId,
@@ -328,13 +430,23 @@ class SalesService {
               userId: s.sub,
               entityType: 'SALE',
               entityId: sale.id,
-              action: 'SALE_MANUAL_PRICE',
+              action: lines.some((line) => !line.input.productId) ? 'SALE_QUICK_LINE' : 'SALE_MANUAL_PRICE',
             },
           });
         return this.visible(s, sale);
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+      );
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const completed = await this.db.sale.findUnique({
+          where: { operationId: dto.operationId },
+          include: { items: true, payments: { include: { paymentMethod: true } } },
+        });
+        if (completed?.companyId === s.companyId) return this.visible(s, completed);
+      }
+      throw error;
+    }
   }
   visible(s: Session, sale: any) {
     if (s.roles.includes('SUPER_ADMIN') || s.permissions.includes('costs.view')) return sale;
@@ -366,7 +478,7 @@ class SalesService {
         });
         if (!sale) throw new BadRequestException('Venta no anulable');
         for (const item of sale.items)
-          await this.stock.change(
+          if (item.productId) await this.stock.change(
             tx,
             s,
             sale.branchId,
@@ -439,14 +551,14 @@ class SalesService {
                 quantity: x.input.quantity,
                 unitPrice: x.item.unitPrice,
                 amount: x.amount,
-                returnToStock: x.input.returnToStock ?? true,
+                returnToStock: Boolean(x.item.productId) && (x.input.returnToStock ?? true),
               })),
             },
           },
           include: { items: true },
         });
         for (const x of data)
-          if (x.input.returnToStock ?? true)
+          if (x.item.productId && (x.input.returnToStock ?? true))
             await this.stock.change(
               tx,
               s,
@@ -621,6 +733,12 @@ export class PosCatalogService {
               { sku: { contains: q, mode: 'insensitive' } },
               { brand: { name: { contains: q, mode: 'insensitive' } } },
               { barcodes: { some: { barcode: q } } },
+              { supplierProducts: { some: { active: true, OR: [
+                { supplierCode: { contains: q, mode: 'insensitive' } },
+                { supplierBarcode: { contains: q, mode: 'insensitive' } },
+                { supplierDescription: { contains: q, mode: 'insensitive' } },
+              ] } } },
+              { supplierAliases: { some: { normalizedDescription: { contains: q.toLowerCase() } } } },
             ],
           },
       exactCode ? q : undefined,
@@ -648,8 +766,21 @@ export class PosCatalogService {
       },
       select: { id: true, name: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-      take: 16,
-    }).then((groups) => groups.map((group) => ({ ...group, icon: '', buttonSize: 'MEDIUM', kind: 'CATEGORY' })));
+      take: 50,
+    }).then((groups) => {
+      const priority = ['fruta', 'verdura', 'panader', 'fiambre', 'leña', 'carbon', 'carbón'];
+      return groups
+        .sort((a, b) => {
+          const rank = (name: string) => {
+            const normalized = name.toLocaleLowerCase('es-AR');
+            const index = priority.findIndex((term) => normalized.includes(term));
+            return index < 0 ? priority.length : index;
+          };
+          return rank(a.name) - rank(b.name) || a.name.localeCompare(b.name, 'es-AR');
+        })
+        .slice(0, 16)
+        .map((group) => ({ ...group, icon: '', buttonSize: 'MEDIUM', kind: 'CATEGORY' }));
+    });
   }
 
   category(s: Session, branchId: string, categoryId: string) {
@@ -676,6 +807,58 @@ export class PosCatalogService {
     return this.resolve(s, branchId, { id: { in: order } }).then((products) =>
       products.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)),
     );
+  }
+}
+
+@Injectable()
+export class SuspendedSalesService {
+  constructor(private db: PrismaService) {}
+  private async assertBranchAccess(s: Session, branchId: string) {
+    const branch = await this.db.branch.findFirst({ where: { id: branchId, companyId: s.companyId, active: true, deletedAt: null, ...(s.roles.includes('SUPER_ADMIN') ? {} : { OR: [{ users: { some: { id: s.sub } } }, { userAccesses: { some: { userId: s.sub } } }] }) }, select: { id: true } });
+    if (!branch) throw new BadRequestException('Sucursal no autorizada');
+  }
+  private async openContext(s: Session, dto: Pick<SuspendSaleDto, 'branchId' | 'terminalId' | 'cashSessionId'>) {
+    await this.assertBranchAccess(s, dto.branchId);
+    const session = await this.db.cashSession.findFirst({ where: { id: dto.cashSessionId, companyId: s.companyId, branchId: dto.branchId, terminalId: dto.terminalId, status: 'OPEN', terminal: { active: true } } });
+    if (!session) throw new BadRequestException('La caja o terminal ya no está abierta');
+  }
+  async list(s: Session, branchId: string) {
+    await this.assertBranchAccess(s, branchId);
+    return this.db.suspendedSale.findMany({ where: { companyId: s.companyId, branchId, status: SuspendedSaleStatus.PENDING }, include: { suspendedBy: { select: { id: true, firstName: true, lastName: true, username: true } }, terminal: { select: { id: true, name: true, code: true } } }, orderBy: { suspendedAt: 'desc' }, take: 100 });
+  }
+  async suspend(s: Session, dto: SuspendSaleDto) {
+    await this.openContext(s, dto);
+    const cart = sanitizeSuspendedCart(dto.cart), productIds = cart.snapshot.flatMap((line) => line.productId ? [line.productId] : []);
+    const configs = await this.db.branchProduct.findMany({ where: { branchId: dto.branchId, productId: { in: productIds }, enabled: true, product: { companyId: s.companyId, active: true, deletedAt: null } }, select: { id: true, productId: true } });
+    if (configs.length !== new Set(productIds).size) throw new BadRequestException('La venta contiene productos que ya no están disponibles en esta sucursal');
+    const configByProduct = new Map(configs.map((config) => [config.productId, config.id]));
+    const snapshot = cart.snapshot.map((line) => ({ ...line, ...(line.productId ? { branchProductId: configByProduct.get(line.productId)! } : {}) }));
+    return this.db.$transaction(async (tx) => {
+      const row = await tx.suspendedSale.create({ data: { companyId: s.companyId, branchId: dto.branchId, terminalId: dto.terminalId, cashSessionId: dto.cashSessionId, suspendedByUserId: s.sub, cartSnapshot: snapshot as unknown as Prisma.InputJsonValue, itemCount: cart.itemCount, total: cart.total }, include: { suspendedBy: { select: { id: true, firstName: true, lastName: true, username: true } }, terminal: { select: { id: true, name: true, code: true } } } });
+      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: dto.branchId, userId: s.sub, entityType: 'SUSPENDED_SALE', entityId: row.id, action: 'SALE_SUSPENDED', metadata: { terminalId: dto.terminalId, cashSessionId: dto.cashSessionId, itemCount: cart.itemCount, total: cart.total.toString() } } });
+      return row;
+    });
+  }
+  recover(s: Session, id: string) {
+    return this.db.$transaction(async (tx) => {
+      const row = await tx.suspendedSale.findFirst({ where: { id, companyId: s.companyId, status: SuspendedSaleStatus.PENDING } });
+      if (!row) throw new NotFoundException('La venta suspendida no existe o ya fue recuperada');
+      await this.assertBranchAccess(s, row.branchId);
+      const changed = await tx.suspendedSale.updateMany({ where: { id, status: SuspendedSaleStatus.PENDING }, data: { status: SuspendedSaleStatus.RECOVERED, recoveredAt: new Date(), recoveredByUserId: s.sub } });
+      if (!changed.count) throw new ConflictException('La venta suspendida ya fue recuperada en otra caja');
+      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: row.branchId, userId: s.sub, entityType: 'SUSPENDED_SALE', entityId: row.id, action: 'SUSPENDED_SALE_RECOVERED', metadata: { originalTerminalId: row.terminalId, itemCount: row.itemCount, total: row.total.toString() } } });
+      return { ...row, status: SuspendedSaleStatus.RECOVERED };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+  cancel(s: Session, id: string) {
+    return this.db.$transaction(async (tx) => {
+      const row = await tx.suspendedSale.findFirst({ where: { id, companyId: s.companyId, status: SuspendedSaleStatus.PENDING } });
+      if (!row) throw new NotFoundException('La venta suspendida no existe o ya fue procesada');
+      await this.assertBranchAccess(s, row.branchId);
+      await tx.suspendedSale.update({ where: { id }, data: { status: SuspendedSaleStatus.CANCELLED, cancelledAt: new Date(), cancelledByUserId: s.sub } });
+      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: row.branchId, userId: s.sub, entityType: 'SUSPENDED_SALE', entityId: row.id, action: 'SUSPENDED_SALE_CANCELLED', metadata: { itemCount: row.itemCount, total: row.total.toString() } } });
+      return { ok: true };
+    });
   }
 }
 
@@ -762,10 +945,37 @@ class SalesController {
     return this.svc.reprint(s, id);
   }
 }
+@Controller('suspended-sales')
+class SuspendedSalesController {
+  constructor(private suspended: SuspendedSalesService) {}
+  @Get() @RequirePermissions('sales.access') list(@CurrentSession() s: Session, @Query('branchId') branchId: string) {
+    if (!branchId) throw new BadRequestException('Sucursal requerida');
+    return this.suspended.list(s, branchId);
+  }
+  @Post() @RequirePermissions('sales.create') suspend(@CurrentSession() s: Session, @Body() dto: SuspendSaleDto) {
+    return this.suspended.suspend(s, dto);
+  }
+  @Post(':id/recover') @RequirePermissions('sales.create') recover(@CurrentSession() s: Session, @Param('id') id: string) {
+    return this.suspended.recover(s, id);
+  }
+  @Post(':id/cancel') @RequirePermissions('sales.create') cancel(@CurrentSession() s: Session, @Param('id') id: string) {
+    return this.suspended.cancel(s, id);
+  }
+}
+
 @Controller('payment-methods')
-class PaymentMethodsController {
+export class PaymentMethodsController {
   constructor(private db: PrismaService) {}
-  @Get() @RequirePermissions('paymentMethods.view') list(@CurrentSession() s: Session) {
+  @Get() @RequirePermissions('sales.access') async list(@CurrentSession() s: Session) {
+    await this.db.paymentMethod.createMany({ data: [
+        ['CASH', 'Efectivo', PaymentMethodKind.CASH],
+        ['DEBIT', 'Débito', PaymentMethodKind.DEBIT],
+        ['CREDIT', 'Crédito', PaymentMethodKind.CREDIT],
+        ['TRANSFER', 'Transferencia', PaymentMethodKind.TRANSFER],
+        ['MERCADO_PAGO', 'QR / Mercado Pago', PaymentMethodKind.QR],
+        ['ACCOUNT_CURRENT', 'Cuenta corriente', PaymentMethodKind.ACCOUNT],
+        ['OTHER', 'Otro', PaymentMethodKind.OTHER],
+    ].map(([code, name, kind], sortOrder) => ({ companyId: s.companyId, code, name, kind: kind as PaymentMethodKind, sortOrder, requiresReference: ['TRANSFER', 'MERCADO_PAGO', 'ACCOUNT_CURRENT', 'OTHER'].includes(code as string) })), skipDuplicates: true });
     return this.db.paymentMethod.findMany({ where: { companyId: s.companyId }, orderBy: { sortOrder: 'asc' } });
   }
   @Post() @RequirePermissions('paymentMethods.manage') create(@CurrentSession() s: Session, @Body() d: ConfigDto) {
@@ -785,18 +995,29 @@ class TerminalsController {
   @Get() @RequirePermissions('terminals.view') list(@CurrentSession() s: Session) {
     return this.db.terminal.findMany({
       where: { companyId: s.companyId, branchId: s.branchId ?? undefined },
+      include: { cashSessions: { where: { status: 'OPEN' }, take: 1, select: { id: true, openedAt: true, cashier: { select: { firstName: true, lastName: true } } } } },
       orderBy: { name: 'asc' },
     });
   }
   @Post() @RequirePermissions('terminals.manage') create(@CurrentSession() s: Session, @Body() d: TerminalDto) {
-    return this.db.terminal.create({ data: { companyId: s.companyId, ...d } });
+    return this.ownedBranch(s, d.branchId).then(() => this.db.terminal.create({ data: { companyId: s.companyId, ...d, posConfig: d.posConfig as Prisma.InputJsonValue | undefined, code: d.code.trim().toUpperCase() } }));
   }
   @Patch(':id') @RequirePermissions('terminals.manage') update(
     @CurrentSession() s: Session,
     @Param('id') id: string,
     @Body() d: TerminalDto,
   ) {
-    return this.db.terminal.updateMany({ where: { id, companyId: s.companyId }, data: d });
+    return this.ownedBranch(s, d.branchId).then(async () => {
+      const terminal = await this.db.terminal.findFirst({ where: { id, companyId: s.companyId } });
+      if (!terminal) throw new NotFoundException('Terminal no encontrada');
+      if (d.active === false && await this.db.cashSession.count({ where: { terminalId: id, status: 'OPEN' } }))
+        throw new BadRequestException('No se puede desactivar una terminal con caja abierta');
+      return this.db.terminal.update({ where: { id }, data: { ...d, posConfig: d.posConfig as Prisma.InputJsonValue | undefined, code: d.code.trim().toUpperCase() } });
+    });
+  }
+  private async ownedBranch(s: Session, branchId: string) {
+    if (s.branchId && s.branchId !== branchId) throw new BadRequestException('Sucursal inválida');
+    if (!(await this.db.branch.count({ where: { id: branchId, companyId: s.companyId, active: true, deletedAt: null } }))) throw new BadRequestException('Sucursal inválida');
   }
 }
 
@@ -862,6 +1083,76 @@ export class CashSessionsController {
     if (current) await this.branch(s, current.branchId);
     return current;
   }
+  private async openSession(s: Session, id: string) {
+    const session = await this.db.cashSession.findFirst({
+      where: { id, companyId: s.companyId, status: 'OPEN' },
+      include: { terminal: true, cashier: { select: { id: true, firstName: true, lastName: true, username: true } } },
+    });
+    if (!session) throw new NotFoundException('La caja ya está cerrada o no existe');
+    await this.branch(s, session.branchId);
+    return session;
+  }
+  private async summaryData(client: PrismaService | Prisma.TransactionClient, session: { id: string; openingAmount: Prisma.Decimal }) {
+    const [payments, movements] = await Promise.all([
+      client.payment.findMany({
+        where: { sale: { cashSessionId: session.id, status: SaleStatus.COMPLETED } },
+        select: { amount: true, cashImpact: true, paymentMethod: { select: { kind: true, name: true } } },
+      }),
+      client.cashMovement.findMany({ where: { cashSessionId: session.id }, orderBy: { createdAt: 'desc' } }),
+    ]);
+    const movementImpact = movements.reduce(
+      (sum, movement) => sum.plus(movement.kind === CashMovementKind.INCOME ? movement.amount : movement.amount.neg()),
+      new Prisma.Decimal(0),
+    );
+    const cashSales = payments.reduce((total, payment) => total.plus(payment.cashImpact), new Prisma.Decimal(0));
+    const paymentBreakdown = Object.values(payments.reduce<Record<string, { kind: string; name: string; total: Prisma.Decimal }>>((groups, payment) => {
+      const key = payment.paymentMethod.kind;
+      groups[key] ??= { kind: key, name: payment.paymentMethod.name, total: new Prisma.Decimal(0) };
+      groups[key].total = groups[key].total.plus(payment.amount);
+      return groups;
+    }, {}));
+    return { cashSales, paymentBreakdown, movementImpact, movements, expectedCash: new Prisma.Decimal(session.openingAmount).plus(cashSales).plus(movementImpact) };
+  }
+  @Get(':id/summary') @RequirePermissions('cashSessions.movements.view') async summary(
+    @CurrentSession() s: Session,
+    @Param('id') id: string,
+  ) {
+    const session = await this.openSession(s, id);
+    return { ...await this.summaryData(this.db, session), openingAmount: session.openingAmount };
+  }
+  @Post(':id/movements') @RequirePermissions('cashSessions.movements.create') async movement(
+    @CurrentSession() s: Session,
+    @Param('id') id: string,
+    @Body() dto: CashMovementDto,
+  ) {
+    const session = await this.openSession(s, id);
+    return this.db.$transaction(async (tx) => {
+      const movement = await tx.cashMovement.create({
+        data: {
+          companyId: s.companyId,
+          branchId: session.branchId,
+          cashSessionId: session.id,
+          kind: dto.kind,
+          amount: dto.amount,
+          reason: dto.reason.trim(),
+          userId: s.sub,
+          origin: 'POS',
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          companyId: s.companyId,
+          branchId: session.branchId,
+          userId: s.sub,
+          entityType: 'CASH_MOVEMENT',
+          entityId: movement.id,
+          action: `CASH_${dto.kind}`,
+          metadata: { cashSessionId: session.id, amount: String(dto.amount), reason: dto.reason.trim(), origin: 'POS' },
+        },
+      });
+      return movement;
+    });
+  }
   @Post('open') @RequirePermissions('cashSessions.open') async open(
     @CurrentSession() s: Session,
     @Body() dto: OpenCashSessionDto,
@@ -874,8 +1165,12 @@ export class CashSessionsController {
       : null;
     if (!terminal) {
       if (dto.terminalId) throw new BadRequestException('Terminal inválida');
-      const count = await this.db.terminal.count({ where: { companyId: s.companyId, branchId: dto.branchId } });
-      terminal = await this.db.terminal.create({ data: { companyId: s.companyId, branchId: dto.branchId, code: `CAJA-${count + 1}`, name: dto.terminalName?.trim() || `Caja ${count + 1}` } });
+      if (!sessionCan(s, 'terminals.manage')) throw new BadRequestException('No hay terminal configurada. Solicite a un administrador que cree una.');
+      const existingCodes = await this.db.terminal.findMany({ where: { companyId: s.companyId, branchId: dto.branchId }, select: { code: true } });
+      const used = new Set(existingCodes.map(({ code }) => code.toUpperCase()));
+      let next = 1;
+      while (used.has(`CAJA-${next}`)) next++;
+      terminal = await this.db.terminal.create({ data: { companyId: s.companyId, branchId: dto.branchId, code: `CAJA-${next}`, name: dto.terminalName?.trim() || `Caja ${next}` } });
     }
     const cashier = await this.db.user.findFirst({
       where: { id: dto.cashierUserId, companyId: s.companyId, active: true, deletedAt: null, OR: [{ branchId: dto.branchId }, { branchAccesses: { some: { branchId: dto.branchId } } }] },
@@ -884,35 +1179,38 @@ export class CashSessionsController {
       throw new BadRequestException('Terminal o cajero inválido');
     const existing = await this.db.cashSession.findFirst({ where: { terminalId: terminal.id, status: 'OPEN' } });
     if (existing) throw new BadRequestException('La terminal ya tiene una caja abierta');
-    return this.db.$transaction(async (tx) => {
-      const opened = await tx.cashSession.create({
+    try {
+      return await this.db.$transaction(async (tx) => {
+        const opened = await tx.cashSession.create({
         data: { companyId: s.companyId, branchId: dto.branchId, terminalId: terminal.id, cashierUserId: dto.cashierUserId, openedByUserId: s.sub, openingAmount: dto.openingAmount },
         include: { cashier: { select: { id: true, firstName: true, lastName: true, username: true } }, terminal: true },
       });
-      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: dto.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: opened.id, action: 'CASH_SESSION_OPENED', metadata: { openingAmount: String(dto.openingAmount), terminalId: terminal.id, cashierUserId: dto.cashierUserId } } });
-      return opened;
-    });
+        await tx.auditLog.create({ data: { companyId: s.companyId, branchId: dto.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: opened.id, action: 'CASH_SESSION_OPENED', metadata: { openingAmount: String(dto.openingAmount), terminalId: terminal.id, cashierUserId: dto.cashierUserId } } });
+        return opened;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+        throw new BadRequestException('La terminal ya tiene una caja abierta');
+      throw error;
+    }
   }
   @Post('close') @RequirePermissions('cashSessions.close') async close(
     @CurrentSession() s: Session,
     @Body() dto: CloseCashSessionDto,
   ) {
-    const current = await this.db.cashSession.findFirst({
-      where: { id: dto.cashSessionId, companyId: s.companyId, status: 'OPEN' },
-      include: { terminal: true, cashier: { select: { id: true, firstName: true, lastName: true, username: true } } },
-    });
-    if (!current) throw new NotFoundException('La caja ya está cerrada o no existe');
-    await this.branch(s, current.branchId);
+    const current = await this.openSession(s, dto.cashSessionId);
     if (current.cashierUserId !== s.sub && !s.roles.includes('SUPER_ADMIN') && !s.permissions.includes('sales.authorizeDiscount'))
       throw new BadRequestException('No puede cerrar la caja de otro cajero');
     return this.db.$transaction(async (tx) => {
+      const summary = await this.summaryData(tx, current);
+      const expectedCash = summary.expectedCash;
       const closed = await tx.cashSession.update({
         where: { id: current.id },
         data: { status: 'CLOSED', closingAmount: dto.closingAmount, closingNote: dto.closingNote?.trim() || null, closedAt: new Date(), closedByUserId: s.sub },
         include: { terminal: true, cashier: { select: { id: true, firstName: true, lastName: true, username: true } } },
       });
-      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: current.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: current.id, action: 'CASH_SESSION_CLOSED', metadata: { openingAmount: String(current.openingAmount), closingAmount: String(dto.closingAmount), terminalId: current.terminalId, cashierUserId: current.cashierUserId } } });
-      return closed;
+      await tx.auditLog.create({ data: { companyId: s.companyId, branchId: current.branchId, userId: s.sub, entityType: 'CASH_SESSION', entityId: current.id, action: 'CASH_SESSION_CLOSED', metadata: { openingAmount: String(current.openingAmount), cashSales: String(summary.cashSales), manualMovements: summary.movementImpact.toString(), expectedCash: expectedCash.toString(), closingAmount: String(dto.closingAmount), difference: new Prisma.Decimal(dto.closingAmount).minus(expectedCash).toString(), terminalId: current.terminalId, cashierUserId: current.cashierUserId } } });
+      return { ...closed, cashSales: summary.cashSales, paymentBreakdown: summary.paymentBreakdown, movementImpact: summary.movementImpact, expectedCash, difference: new Prisma.Decimal(dto.closingAmount).minus(expectedCash) };
     });
   }
 }
@@ -953,7 +1251,7 @@ class PosQuickGroupsController {
 }
 @Module({
   imports: [StockModule],
-  controllers: [PosController, SalesController, PaymentMethodsController, TerminalsController, CashSessionsController, PosQuickGroupsController],
-  providers: [SalesService, PriceResolutionService, PosCatalogService],
+  controllers: [PosController, SalesController, SuspendedSalesController, PaymentMethodsController, TerminalsController, CashSessionsController, PosQuickGroupsController],
+  providers: [SalesService, PriceResolutionService, PosCatalogService, SuspendedSalesService],
 })
 export class SalesModule {}

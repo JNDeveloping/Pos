@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1680" role="img" aria-labelledby="title description">
+  <title id="title">Estado actual del sistema POS ERP</title>
+  <desc id="description">Resumen visual editable de la arquitectura, flujos, módulos y riesgos de El Rincón de los Nietos.</desc>
+  <style>
+    .bg { fill: #f3f5f7; }
+    .header { fill: #17212b; }
+    .card { fill: #ffffff; stroke: #d8dee5; stroke-width: 2; }
+    .accent { fill: #16854b; }
+    .warning { fill: #fff5d9; stroke: #e0ad32; stroke-width: 2; }
+    .title { fill: #ffffff; font: 700 42px Arial, sans-serif; }
+    .subtitle { fill: #cdd6df; font: 20px Arial, sans-serif; }
+    .section { fill: #17212b; font: 700 25px Arial, sans-serif; }
+    .body { fill: #344454; font: 18px Arial, sans-serif; }
+    .small { fill: #586979; font: 16px Arial, sans-serif; }
+    .badge { fill: #ffffff; font: 700 15px Arial, sans-serif; }
+    .risk { fill: #6d4d00; font: 18px Arial, sans-serif; }
+    .flow { fill: #16854b; font: 700 18px Arial, sans-serif; }
+  </style>
+  <rect class="bg" width="1200" height="1680" />
+  <rect class="header" width="1200" height="190" />
+  <rect class="accent" x="0" y="180" width="1200" height="10" />
+  <text class="title" x="60" y="78">ESTADO ACTUAL DEL SISTEMA</text>
+  <text class="subtitle" x="60" y="118">El Rincón de los Nietos · POS / ERP</text>
+  <text class="subtitle" x="60" y="151">Resumen técnico y funcional · 8 de septiembre de 2026</text>
+
+  <rect class="card" x="50" y="230" width="1100" height="180" rx="10" />
+  <text class="section" x="80" y="275">ARQUITECTURA CONSERVADA</text>
+  <text class="body" x="80" y="315">Frontend</text>
+  <text class="small" x="80" y="344">React 19 · Vite 7 · TypeScript · SPA/PWA bajo /pos/</text>
+  <text class="body" x="600" y="315">Backend</text>
+  <text class="small" x="600" y="344">NestJS 11 · Prisma 6 · PostgreSQL · JWT/RBAC</text>
+  <text class="body" x="80" y="382">Tiempo real</text>
+  <text class="small" x="200" y="382">Socket.IO para Caja en vivo</text>
+  <text class="body" x="600" y="382">Fuente de verdad</text>
+  <text class="small" x="770" y="382">API y PostgreSQL central</text>
+
+  <rect class="card" x="50" y="440" width="1100" height="210" rx="10" />
+  <text class="section" x="80" y="485">FLUJOS CONECTADOS EN CÓDIGO</text>
+  <text class="flow" x="80" y="530">PRODUCTO → PRECIO POR SUCURSAL → STOCK → POS → VENTA → PAGO → CAJA</text>
+  <text class="small" x="80" y="564">El servidor revalida producto, sucursal, precio, permisos, stock, terminal, caja y pagos.</text>
+  <text class="flow" x="80" y="606">COMPRA → COSTO → PRICING → HISTORIAL → ETIQUETA → STOCK</text>
+  <text class="small" x="80" y="636">La confirmación crítica está diseñada como operación transaccional.</text>
+
+  <rect class="card" x="50" y="680" width="530" height="390" rx="10" />
+  <text class="section" x="80" y="725">BACKEND ACTUAL</text>
+  <text class="body" x="80" y="770">• Autenticación JWT, refresh y RBAC</text>
+  <text class="body" x="80" y="807">• Catálogo multiempresa y multisucursal</text>
+  <text class="body" x="80" y="844">• Pricing central: margen y redondeo</text>
+  <text class="body" x="80" y="881">• Stock por salón y depósito</text>
+  <text class="body" x="80" y="918">• Compras, costos e historiales</text>
+  <text class="body" x="80" y="955">• Ventas y pagos idempotentes</text>
+  <text class="body" x="80" y="992">• Caja, terminales y movimientos</text>
+  <text class="body" x="80" y="1029">• Auditoría, etiquetas y POS live</text>
+
+  <rect class="card" x="620" y="680" width="530" height="390" rx="10" />
+  <text class="section" x="650" y="725">FRONTEND ACTUAL</text>
+  <text class="body" x="650" y="770">• Navegación SPA y sesión estable</text>
+  <text class="body" x="650" y="807">• Productos paginados y filtros</text>
+  <text class="body" x="650" y="844">• POS scanner-first y táctil</text>
+  <text class="body" x="650" y="881">• Pago mixto, vuelto y ticket</text>
+  <text class="body" x="650" y="918">• Suspendidos compartidos en servidor</text>
+  <text class="body" x="650" y="955">• Administración móvil</text>
+  <text class="body" x="650" y="992">• Etiquetas Fleje, FyV y A5</text>
+  <text class="body" x="650" y="1029">• Monitor de cajas mediante Socket.IO</text>
+
+  <rect class="accent" x="50" y="1100" width="250" height="44" rx="7" />
+  <text class="badge" x="76" y="1128">BASE REUTILIZABLE</text>
+  <rect class="card" x="50" y="1160" width="1100" height="165" rx="10" />
+  <text class="section" x="80" y="1205">ESTADO FUNCIONAL</text>
+  <text class="body" x="80" y="1247">Más maduros: Productos, Pricing, POS, pagos, stock, caja y terminales.</text>
+  <text class="body" x="80" y="1283">Parciales: Compras UI, vencimientos, reportes, impresión y validación integral.</text>
+  <text class="body" x="80" y="1319">No completos: Clientes, mayor de cuenta corriente, alertas y servidor local.</text>
+
+  <rect class="warning" x="50" y="1355" width="1100" height="230" rx="10" />
+  <text class="section" x="80" y="1400">RIESGOS Y PRÓXIMO PASO</text>
+  <text class="risk" x="80" y="1443">1. Aplicar las 24 migraciones sobre PostgreSQL de staging.</text>
+  <text class="risk" x="80" y="1480">2. Ejecutar el recorrido producto → compra → stock → venta → caja.</text>
+  <text class="risk" x="80" y="1517">3. Medir búsquedas con un catálogo equivalente a 50.000 productos.</text>
+  <text class="risk" x="80" y="1554">4. No declarar producción certificada basándose solamente en mocks unitarios.</text>
+
+  <text class="small" x="50" y="1635">Detalle completo: docs/ESTADO_ACTUAL_SISTEMA.md · Este SVG es texto editable y revisable en Git.</text>
+</svg>

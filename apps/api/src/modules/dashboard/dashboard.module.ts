@@ -2,6 +2,13 @@ import { BadRequestException, Controller, Get, Module, Query } from '@nestjs/com
 import { SaleStatus } from '@prisma/client';
 import { CurrentSession, RequirePermissions, Session } from '../../common/auth';
 import { PrismaService } from '../../prisma.service';
+const ARGENTINA_OFFSET_MS = 3 * 60 * 60 * 1000;
+export function argentinaDayStart(now = new Date()) {
+  const local = new Date(now.getTime() - ARGENTINA_OFFSET_MS);
+  return new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), 3));
+}
+const argentinaDateKey = (date: Date) => new Date(date.getTime() - ARGENTINA_OFFSET_MS).toISOString().slice(0, 10);
+const argentinaHour = (date: Date) => (date.getUTCHours() + 21) % 24;
 @Controller('dashboard')
 export class DashboardController {
   constructor(private db: PrismaService) {}
@@ -31,9 +38,9 @@ export class DashboardController {
     const branchIds = requestedBranchId ? [requestedBranchId] : availableBranches.map((branch) => branch.id),
       days = requestedDays === '30' ? 30 : 7,
       now = new Date(),
-      today = new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+      today = argentinaDayStart(now),
       yesterday = new Date(today.getTime() - 86400000),
-      month = new Date(now.getFullYear(), now.getMonth(), 1),
+      month = new Date(Date.UTC(new Date(now.getTime() - ARGENTINA_OFFSET_MS).getUTCFullYear(), new Date(now.getTime() - ARGENTINA_OFFSET_MS).getUTCMonth(), 1, 3)),
       periodStart = new Date(today.getTime() - (days - 1) * 86400000);
     const saleWhere = {
       companyId: s.companyId,
@@ -54,6 +61,9 @@ export class DashboardController {
       paymentGroups,
       todayItems,
       monthItems,
+      openSessions,
+      incompleteProducts,
+      salesByBranch,
     ] = await Promise.all([
       this.db.sale.aggregate({
         where: { ...saleWhere, completedAt: { gte: today } },
@@ -118,7 +128,7 @@ export class DashboardController {
       }),
       this.db.payment.groupBy({
         by: ['paymentMethodId'],
-        where: { sale: { ...saleWhere, completedAt: { gte: month } } },
+        where: { sale: { ...saleWhere, completedAt: { gte: today } } },
         _sum: { amount: true },
       }),
       this.db.saleItem.aggregate({
@@ -129,6 +139,27 @@ export class DashboardController {
         where: { sale: { ...saleWhere, completedAt: { gte: month } } },
         _sum: { quantity: true },
       }),
+      this.db.cashSession.findMany({
+        where: { companyId: s.companyId, branchId: { in: branchIds }, status: 'OPEN' },
+        select: {
+          id: true,
+          branchId: true,
+          openingAmount: true,
+          terminal: { select: { name: true } },
+          cashier: { select: { firstName: true, lastName: true } },
+          movements: { select: { kind: true, amount: true } },
+          sales: { where: { status: SaleStatus.COMPLETED }, select: { payments: { select: { cashImpact: true } } } },
+        },
+      }),
+      this.db.branchProduct.count({
+        where: { branchId: { in: branchIds }, enabled: true, OR: [{ salePrice: 0 }, { cost: 0 }] },
+      }),
+      this.db.sale.groupBy({
+        by: ['branchId'],
+        where: { ...saleWhere, completedAt: { gte: today } },
+        _sum: { total: true },
+        _count: true,
+      }),
     ]);
     const methodIds = paymentGroups.map((x) => x.paymentMethodId),
       methods = await this.db.paymentMethod.findMany({
@@ -137,20 +168,20 @@ export class DashboardController {
       }),
       daily = Array.from({ length: days }, (_, i) => {
         const date = new Date(periodStart.getTime() + i * 86400000),
-          key = date.toISOString().slice(0, 10);
+          key = argentinaDateKey(date);
         return {
           date: key,
           total: sevenDays
-            .filter((x) => x.completedAt?.toISOString().slice(0, 10) === key)
+            .filter((x) => x.completedAt && argentinaDateKey(x.completedAt) === key)
             .reduce((n, x) => n + Number(x.total), 0),
         };
       }),
       hourly = Array.from({ length: 24 }, (_, hour) => ({
         hour,
         total: sevenDays
-          .filter((sale) => sale.completedAt?.getHours() === hour)
+          .filter((sale) => sale.completedAt && argentinaHour(sale.completedAt) === hour)
           .reduce((total, sale) => total + Number(sale.total), 0),
-        tickets: sevenDays.filter((sale) => sale.completedAt?.getHours() === hour).length,
+        tickets: sevenDays.filter((sale) => sale.completedAt && argentinaHour(sale.completedAt) === hour).length,
       }));
     const stockMap = new Map(
       stocksForLow.map((row) => [
@@ -166,6 +197,17 @@ export class DashboardController {
     const todayTotal = Number(todaySales._sum.total ?? 0),
       yesterdayTotal = Number(yesterdaySales._sum.total ?? 0),
       monthTotal = Number(monthSales._sum.total ?? 0);
+    const openCash = openSessions.map((cash) => {
+      const salesCash = cash.sales.reduce(
+        (total, sale) => total + sale.payments.reduce((subtotal, payment) => subtotal + Number(payment.cashImpact), 0),
+        0,
+      );
+      const movements = cash.movements.reduce(
+        (total, movement) => total + (movement.kind === 'INCOME' ? Number(movement.amount) : -Number(movement.amount)),
+        0,
+      );
+      return { id: cash.id, branchId: cash.branchId, terminal: cash.terminal.name, cashier: `${cash.cashier.firstName} ${cash.cashier.lastName}`, expectedCash: Number(cash.openingAmount) + salesCash + movements };
+    });
     return {
       todaySales: todayTotal,
       yesterdaySales: yesterdayTotal,
@@ -183,6 +225,15 @@ export class DashboardController {
       outOfStock,
       expiring,
       lowMargin,
+      incompleteProducts,
+      openCash,
+      openCashCount: openCash.length,
+      expectedCash: openCash.reduce((total, cash) => total + cash.expectedCash, 0),
+      branches: availableBranches.map((branch) => {
+        const sales = salesByBranch.find((row) => row.branchId === branch.id);
+        const branchLow = lowConfigs.filter((row) => row.branchId === branch.id && (stockMap.get(`${row.branchId}:${row.productId}`) ?? 0) <= Number(row.stockMinimum)).length;
+        return { ...branch, salesToday: Number(sales?._sum.total ?? 0), ticketsToday: sales?._count ?? 0, openCash: openCash.filter((cash) => cash.branchId === branch.id).length, alerts: branchLow };
+      }),
       topProducts,
       recentSales,
       daily,
@@ -198,7 +249,7 @@ export class DashboardController {
     const branches = await this.branches(s),
       branchIds = branches.map((branch) => branch.id),
       now = new Date(),
-      today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      today = argentinaDayStart(now);
     const [sales, openCash, stocks, configs, lastSales] = await Promise.all([
       this.db.sale.groupBy({
         by: ['branchId'],

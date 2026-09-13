@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
-  Bell,
+  Activity,
   Boxes,
   Building2,
   ChevronRight,
@@ -13,6 +13,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Printer,
+  ReceiptText,
   Search,
   Settings,
   ShoppingCart,
@@ -22,6 +23,7 @@ import {
   Users,
   Zap,
   X,
+  Clock3,
 } from 'lucide-react';
 import type { Me } from '../lib/api';
 import { can } from '../lib/api';
@@ -31,6 +33,14 @@ import { appPath, currentRoute, navigate } from '../lib/navigation';
 import { clearTokens } from '../lib/auth-session';
 import { FullscreenButton } from './FullscreenButton';
 type NavItem = readonly [string, string, LucideIcon, string];
+const primaryNav: readonly NavItem[] = [
+  ['/admin', 'Inicio', LayoutDashboard, 'dashboard.view'],
+  ['/', 'POS', Store, 'sales.access'],
+  ['/products', 'Productos', PackageSearch, 'products.view'],
+  ['/admin/purchases', 'Compras', ShoppingCart, 'purchases.view'],
+  ['/admin/stock', 'Stock', Boxes, 'stock.view'],
+  ['/admin/sales', 'Ventas', ReceiptText, 'sales.view'],
+];
 const groups: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = [
   {
     label: 'OPERACIÓN',
@@ -42,13 +52,21 @@ const groups: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = [
       ['/admin/purchases', 'Compras', ShoppingCart, 'purchases.view'],
       ['/admin/suppliers', 'Proveedores', Truck, 'suppliers.view'],
       ['/labels', 'Etiquetas', Printer, 'labels.view'],
-      ['/', 'Abrir POS', Store, 'sales.access'],
     ],
   },
   {
-    label: 'ADMINISTRACIÓN',
+    label: 'VENTAS',
+    items: [
+      ['/', 'Abrir POS', Store, 'sales.access'],
+      ['/admin/cash-live', 'Cajas en vivo', Activity, 'sales.liveView'],
+      ['/admin/sales', 'Ventas', ReceiptText, 'sales.view'],
+    ],
+  },
+  {
+    label: 'CONFIGURACIÓN',
     items: [
       ['/branches', 'Sucursales', Building2, 'branches.view'],
+      ['/admin/terminals', 'Terminales', Store, 'terminals.view'],
       ['/users', 'Usuarios', Users, 'users.view'],
       ['/audit', 'Auditoría', FileText, 'audit.view'],
       ['/settings', 'Configuración', Settings, 'branches.settings'],
@@ -70,7 +88,18 @@ export function Layout({
 }) {
   const [collapsed, setCollapsed] = useState(false),
     [drawer, setDrawer] = useState(false),
-    [profile, setProfile] = useState(false);
+    [profile, setProfile] = useState(false),
+    [globalSearch, setGlobalSearch] = useState(''),
+    [clock, setClock] = useState(new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  function submitSearch(event: FormEvent) {
+    event.preventDefault();
+    const value = globalSearch.trim();
+    if (value) navigate(`/products?search=${encodeURIComponent(value)}`);
+  }
   const route = currentRoute();
   const sidebar = (
     <>
@@ -97,7 +126,12 @@ export function Layout({
           const visible = group.items.filter((i) => can(me, i[3]));
           return visible.length ? (
             <div key={group.label} className="nav-group">
-              {!collapsed && <p className="nav-label"><span>0{groupIndex + 1}</span>{group.label}</p>}
+              {!collapsed && (
+                <p className="nav-label">
+                  <span>0{groupIndex + 1}</span>
+                  {group.label}
+                </p>
+              )}
               {visible.map(([to, label, Icon]) => (
                 <a
                   key={to}
@@ -117,7 +151,10 @@ export function Layout({
       {!collapsed && (
         <a className="sidebar-command" href={appPath('/')}>
           <Zap size={18} />
-          <span><b>Modo venta</b><small>Volver al POS ahora</small></span>
+          <span>
+            <b>Modo venta</b>
+            <small>Volver al POS ahora</small>
+          </span>
           <ChevronRight size={16} />
         </a>
       )}
@@ -134,7 +171,7 @@ export function Layout({
     </>
   );
   return (
-    <div className={`app-shell ${collapsed ? 'lg:grid-cols-[88px_1fr]' : 'lg:grid-cols-[268px_1fr]'}`}>
+    <div className={`app-shell ${collapsed ? 'lg:grid-cols-[72px_1fr]' : 'lg:grid-cols-[228px_1fr]'}`}>
       <aside className="sidebar hidden lg:flex">{sidebar}</aside>
       {drawer && (
         <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm lg:hidden" onClick={() => setDrawer(false)}>
@@ -157,17 +194,32 @@ export function Layout({
               {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
             </button>
           </div>
-          <label className="global-search">
+          <nav className="commercial-nav" aria-label="Accesos principales">
+            {primaryNav
+              .filter(([, , , permission]) => can(me, permission))
+              .map(([to, label, Icon]) => (
+                <a href={appPath(to)} className={route === to ? 'active' : ''} key={to}>
+                  <Icon size={17} />
+                  <span>{label}</span>
+                </a>
+              ))}
+          </nav>
+          <form className="global-search" onSubmit={submitSearch}>
             <Search size={18} />
-            <input placeholder="Buscar productos, proveedores, facturas…" aria-label="Búsqueda global" />
-          </label>
+            <input
+              value={globalSearch}
+              onChange={(event) => setGlobalSearch(event.target.value)}
+              placeholder="Buscar productos…"
+              aria-label="Búsqueda global"
+            />
+          </form>
           <div className="ml-auto flex items-center gap-2">
             <ConnectionStatus />
+            <span className="system-clock">
+              <Clock3 size={14} />
+              <b>{clock.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</b>
+            </span>
             <FullscreenButton />
-            <button className="icon-button hidden sm:grid" aria-label="Notificaciones">
-              <Bell size={19} />
-              <span className="notification-dot" />
-            </button>
             <div className="relative">
               <button className="profile-button" onClick={() => setProfile(!profile)}>
                 <span className="avatar">
